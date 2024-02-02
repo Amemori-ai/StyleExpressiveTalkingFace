@@ -1,0 +1,14 @@
+net:
+    in_channels: 20
+    depth: 2
+    lr: 0.0001
+data:
+    attr_path: "./tests/exp006.pt"
+    ldm_path: "./tests/lm2d.npy"
+    id_path: "./tests/id.pt"
+batchsize: 8
+epochs: 100
+show_internal: 100
+save_internal: 10
+
+

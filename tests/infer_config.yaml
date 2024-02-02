@@ -1,0 +1,9 @@
+landmarks_path: "/data1/Dataset/chenlong/tx/tx_2d.npy"
+net:
+    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp002/config.yaml"
+    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp002/snapshots/10.pth"
+pti:
+    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/exp006/pti/snapshots/400.pth"
+attr_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/tests/exp006.pt"
+
+e4e_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/tests/id.pt"

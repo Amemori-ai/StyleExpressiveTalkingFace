@@ -1,0 +1,35 @@
+# files
+
+*.pgm
+*.png
+*.jpg
+*.task
+*.pt
+*.pth
+*.swp
+*.swo
+*.mp4
+*.pth
+tags
+
+tests/*.mp4
+                        
+
+# soft link
+codes
+
+# folder
+.idea/
+__pycache__/
+src/
+tensorboard/
+models/
+video/
+tests/puppet
+
+
+# temp file.
+results
+error.txt
+
+
