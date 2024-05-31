@@ -1,0 +1,11 @@
+click
+easydict
+opencv-python-headless
+imageio
+mediapipe
+torchdiffeq
+trimesh
+face_alignment
+onnxruntime
+kornia
+scikit-learn

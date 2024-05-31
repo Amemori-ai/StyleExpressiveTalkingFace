@@ -1,4 +1,5 @@
 import os
+import re
 import torch
 
 if __name__ == '__main__':
@@ -10,7 +11,7 @@ if __name__ == '__main__':
     assert os.path.exists(folder), f"{folder} not exists."
     assert dst_file.endswith('pt'), "expected postfix is pt."
 
-    files = [os.path.join(folder, y) for y in sorted(os.listdir(folder), key = lambda x: int(x.split('.')[0].split('_')[1]))]
+    files = [os.path.join(folder, y) for y in sorted(os.listdir(folder), key = lambda x: int(''.join(re.findall('[0-9]+', x))))]
     attrs_list = []
 
     for _file in files:

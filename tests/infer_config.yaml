@@ -1,9 +1,9 @@
-landmarks_path: "/data1/Dataset/chenlong/tx/tx_2d.npy"
+landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/ldm_e4e.npy"
 net:
-    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp002/config.yaml"
-    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp002/snapshots/10.pth"
+    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp009/config.yaml"
+    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp009/001/snapshots/best.pth"
 pti:
-    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/exp006/pti/snapshots/400.pth"
-attr_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/tests/exp006.pt"
+    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/exp009/video_04/pti/snapshots/400.pth"
+attr_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp009/attr.pt"
 
-e4e_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/tests/id.pt"
+e4e_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp009/id.pt"

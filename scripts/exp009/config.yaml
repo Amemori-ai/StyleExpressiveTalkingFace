@@ -1,0 +1,21 @@
+net:
+    in_channels: 20
+    depth: 1
+    lr: 0.0002
+
+data:
+    attr_path: "./dataset/exp009/attr.pt"
+    ldm_path: "./dataset/exp009/ldm_e4e.npy"
+    id_path: "./dataset/exp009/id.pt"
+    ratio: 0.9
+
+optim:
+    step: 20
+    gamma: 0.5
+
+batchsize: 8
+epochs: 40
+show_internal: 100
+save_internal: 5
+
+

@@ -1,0 +1,26 @@
+models:
+    #-
+    #  path: "Voice2Lip_v1.3.1/posenet/float/cuda/model.onnx"
+    #  fp16: True
+    #  refit: True
+    #-
+    #  path: "Voice2Lip_v1.3.1/audio2motion/float/cuda/model.onnx"
+    #  fp16: True
+    #  refit: True
+    #-
+    #  path: "Voice2Lip_v1.3.1/HubertInfer/float/cuda/model.onnx"
+    #  fp16: False
+    #  refit: False
+    #-
+    #  path: "Voice2Lip_v1.3.1/e4e/float/cuda/model.onnx"
+    #  fp16: True
+    #  refit: True
+    #-
+    #  path: "Hubert/Hubert_v1.0.0/float/cuda/model.onnx"
+    #  fp16: False
+    #  refit: True
+    -
+      path: "Voice2Lip_v1.3.1/e4e-1024d/float/cuda/model.onnx"
+      fp16: False
+      refit: True
+

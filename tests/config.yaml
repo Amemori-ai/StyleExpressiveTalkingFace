@@ -3,9 +3,10 @@ net:
     depth: 2
     lr: 0.001
 data:
-    attr_path: "./tests/exp006.pt"
-    ldm_path: "./tests/lm2d.npy"
-    id_path: "./tests/id.pt"
+     attr_path: "./dataset/exp010/train_attr.pt"
+     ldm_path: "./dataset/exp010/train_landmarks.npy"
+     id_path: "./dataset/exp010/id.pt"
+     id_landmark_path: "./dataset/exp010/id_landmark.npy"
 
 epochs: 100
 show_internal: 100

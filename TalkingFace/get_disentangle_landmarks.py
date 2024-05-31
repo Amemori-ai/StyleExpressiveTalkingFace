@@ -11,8 +11,8 @@ import os.path as osp
 import scipy
 import numpy as np
 import face_alignment
-import random
-import time
+import random 
+import time 
 import subprocess
 import zipfile
 
@@ -31,12 +31,9 @@ from GlintCloud.error import CloudError, G_ERROR_SYSTEM_OTHER
 
 from typing import Callable, Union
 
-
-def landmarks_visualization(
-                             landmarks: list,
-                             save_path: str
-                           ):
-
+def draw_landmarks(landmarks):
+    """draw landmarks function
+    """
     eye_idx = list(range(6, 11))
     mouth_idx = list(range(48, 68))
     pts1, pts2 = [], []
@@ -45,14 +42,58 @@ def landmarks_visualization(
         x, y = landmarks[i]
         if i in eye_idx:
             pts1.append((x, y - 30))
-            landmarks[i][1] = y - 30
+            #landmarks[i][1] = y - 30
         elif i in mouth_idx:
             pts2.append((x, y + 10))
-            landmarks[i][1] = y + 10
+            #landmarks[i][1] = y + 10
     pts1 = np.array(pts1, np.int32)
     pts2 = np.array(pts2, np.int32)
     cv2.polylines(canvas, [pts1], False, (255, 255, 255), 2)
     cv2.polylines(canvas, [pts2], True, (255, 255, 255), 2)
+    return canvas
+
+def draw_multiple_landmarks(landmarks):
+    """draw landmarks function
+    """
+    eye_idx = list(range(6, 11))
+    mouth_idx = list(range(48, 68))
+
+    colors = [
+            
+                (255,255,255),
+                (255,0,0),
+                (0, 255, 0),
+                (0,0, 255)
+             ]
+
+
+    canvas = np.zeros((512, 512, 3), np.uint8)
+    for idx, landmark in enumerate(landmarks):
+        pts1, pts2 = [], []
+        for i in range(68):
+            x, y = landmark[i]
+
+            if i in eye_idx:
+                pts1.append((x, y - 30))
+                #landmarks[i][1] = y - 30
+            elif i in mouth_idx:
+                pts2.append((x, y + 10))
+                #landmarks[i][1] = y + 10
+        pts1 = np.array(pts1, np.int32)
+        pts2 = np.array(pts2, np.int32)
+        color = colors[idx % len(colors)]
+        cv2.polylines(canvas, [pts1], False, color, 2)
+        cv2.polylines(canvas, [pts2], True, color, 2)
+    return canvas
+
+
+def landmarks_visualization(
+                             landmarks: list,
+                             save_path: str
+                           ):
+    """landmark visualization.
+    """
+    canvas = draw_landmarks(landmarks)
     cv2.imwrite(save_path, canvas)
 
 
@@ -151,6 +192,12 @@ class DisentangledLandmarks:
             lm3d = face * 10
         return lm3d
 
+    def lm2d_to_lm3d_like(self, lm2d, face_size = 512):
+        lm2d /= float(face_size)
+        lm2d[:, :, 1] = 1 - lm2d[:, :, 1]
+        lm2d = lm2d * 2 - 1
+        return lm2d
+
     def denorm_lm3d_to_lm2d(self, lm3d, face_size=512):
         """
             lm2d = (lm2d + 1.0) / 2.0 \n
@@ -163,6 +210,9 @@ class DisentangledLandmarks:
         return lm2d
 
     def coeff2lm2d(self, coeff, use_norm=False):
+        if coeff is None:
+            return self.denorm_lm3d_to_lm2d(self.key_mean_shape.reshape([1, 68, 3]))
+
         if use_norm:
             lm3d_std = lm3d_diff.std(axis=0).reshape([1, 68, 3])
 
@@ -173,20 +223,28 @@ class DisentangledLandmarks:
             # diff -> lm3d/lm3d
             lm3d = self.key_mean_shape.reshape(1, 68, 3) + lm3d_diff.reshape(-1, 68, 3) / 10
             lm2d = self.denorm_lm3d_to_lm2d(lm3d)
-
         else:
             lm3d = self.reconstruct_idexp_lm3d(coeff[:, :80], coeff[:, 80:144], add_mean_face=True)
             lm2d = self.denorm_lm3d_to_lm2d(lm3d)
 
-
         # center alignment
-        lrs3_face = (self.lrs3_idexp_mean / 10.0 + self.key_mean_shape.reshape((1, 68, 3)))
-        lrs3_face = self.denorm_lm3d_to_lm2d(lrs3_face)
-        lrs3_center = np.mean(lrs3_face[:, 48:68, :2], axis=1, keepdims=True)  # (1,1, 3)
-        lm2d_center = np.mean(lm2d[:, 48:68, :], axis=1, keepdims=True)  # (1,1, 3)
-        lm2d = lm2d - (lm2d_center - lrs3_center)  # (n,68, 3)
+        #lrs3_face = (self.lrs3_idexp_mean / 10.0 + self.key_mean_shape.reshape((1, 68, 3)))
+        #lrs3_face = self.denorm_lm3d_to_lm2d(lrs3_face)
+        #lrs3_center = np.mean(lrs3_face[:, 48:68, :2], axis=1, keepdims=True)  # (1,1, 3)
+        #lm2d_center = np.mean(lm2d[:, 48:68, :], axis=1, keepdims=True)  # (1,1, 3)
+        #lm2d = lm2d - (lm2d_center - lrs3_center)  # (n,68, 3)
         return lm2d
-        
+
+    def renorm_landmarks(self, landmarks):
+        if landmarks.dtype != np.float32:
+            landmarks = np.float32(landmarks)
+
+        landmarks = self.lm2d_to_lm3d_like(landmarks)
+        _diff = (landmarks - self.key_mean_shape.reshape((1,68,3))[:,:,:2]) * 10
+        _diff = (_diff - _diff.mean(axis = 0).reshape(1,68,2)) / _diff.std(axis = 0).reshape(1,68,2)
+        _diff_to_denorm = _diff * self.lrs3_idexp_std[:,:,:2] + self.lrs3_idexp_mean[:,:,:2]
+        landmarks_renorm = _diff_to_denorm / 10 + self.key_mean_shape.reshape(1, 68, 3)[:,:,:2]
+        return self.denorm_lm3d_to_lm2d(landmarks_renorm)
 
     def get_landmark(
                      self,
@@ -198,7 +256,8 @@ class DisentangledLandmarks:
         if isinstance(face, str):
             face = cv2.imread(face)
             assert face is not None, "face path not exits"
-
+        if face is None:
+            return self.coeff2lm2d(None)
         # Setp 7 Get 3dmm coeff file
         coef = self.get_3dmm_coeff(face)
         return self.coeff2lm2d(coef)
@@ -207,7 +266,7 @@ class DisentangledLandmarks:
     def __call__(
             self,
             face: Union[str , np.ndarray]
-    ):
+        ):
         return self.get_landmark(
                                  face
                                 )

@@ -1,0 +1,21 @@
+net:
+    in_channels: 20
+    depth: 1
+    lr: 0.0002
+    norm_type: 'minmax_constant'
+
+data:
+    attr_path: "./dataset/exp010/attr.pt"
+    ldm_path: "./dataset/exp010/lm2d_e4e.npy"
+    id_path: "./dataset/exp010/id.pt"
+    ratio: 0.9
+
+optim:
+    step: 20
+    gamma: 0.5
+
+batchsize: 8
+epochs: 80
+show_internal: 100
+save_internal: 5
+

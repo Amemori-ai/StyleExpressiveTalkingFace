@@ -26,6 +26,8 @@ tensorboard/
 models/
 video/
 tests/puppet
+release/
+dataset/
 
 
 # temp file.
