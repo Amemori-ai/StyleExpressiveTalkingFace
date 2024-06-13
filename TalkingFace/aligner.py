@@ -337,9 +337,13 @@ class ValDataset:
 
 def update_lip_region_offset(
                               dlatents,
-                              offset
+                              offset,
+                              version = "v1"
                            ):
-    return update_region_offset(dlatents, offset, [0,8])
+    if version == 'v1':
+        return update_region_offset(dlatents, offset, [0,8])
+    if version == 'v2':
+        return update_region_offset_v2(dlatents, offset, [0,8])
 
 def update_region_offset(
                           dlatents,
@@ -354,6 +358,20 @@ def update_region_offset(
             dlatents_tmp[k][:, i] = dlatents[k][:, i] + offset[:,count]
             count += 1
     return dlatents_tmp
+
+def update_region_offset_v2(
+                          dlatents,
+                          offset,
+                          region_range
+                        ):
+    dlatents_tmp = [torch.zeros_like(latent) for latent in dlatents]
+    count = 0
+    #first 5 elements.
+    for k, v in alphas[region_range[0]:region_range[1]]:
+        for i in v:
+            dlatents_tmp[k][:, i] = offset[:,count]
+            count += 1
+    return [(x, y) for (x,y) in zip(dlatents, dlatents_tmp)]
 
 def aligner(
             config_path: str,
@@ -577,7 +595,7 @@ def sync_lip_validate(
     resolution = kwargs.get("resolution", 1024)
     decoder = StyleSpaceDecoder(stylegan_path, to_resolution = resolution)
     decoder.load_state_dict(torch.load(pti_weight_path), False)
-    
+    decoder.to(device)
     attributes = torch.load(attributes_path)
     get_disentangled_landmarks = DisentangledLandmarks()
     _, selected_id_image, selected_id_latent, selected_id = torch.load(e4e_latent_path)
@@ -603,13 +621,14 @@ def sync_lip_validate(
         for i in p_bar:
             attribute = attributes[i]
             w_plus_with_pose = torch.load(os.path.join(pose_latent_path, f'{i + 1}.pt'))
+            #w_plus_with_pose = torch.load(os.path.join(pose_latent_path, f'{1}.pt'))
             style_space_latent = decoder.get_style_space(w_plus_with_pose)
             landmark_offset = torch.from_numpy(landmark_offsets[i]).unsqueeze(0).float().to(device)
-            #ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1]).reshape(1, -1).to(device), [0, len(alphas)])
+            #ss_updated = update_region_offset_v2(style_space_latent, torch.tensor(attribute[1]).reshape(1, -1).to(device), [0, len(alphas)])
             ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1][size_of_alpha:]).reshape(1, -1).to(device), [8, len(alphas)])
             with torch.no_grad():
                 offset = net(landmark_offset)
-            ss_updated = update_lip_region_offset(ss_updated, offset)
+            ss_updated = update_lip_region_offset(ss_updated, offset, version = 'v2')
             #ss_updated = torch.load(os.path.join(pose_latent_path, f'{i + 1}.pt'))
             #ss_updated = [x.to(device) for x in ss_updated]
             output = np.clip(from_tensor(decoder(ss_updated) * 0.5 + 0.5) * 255.0, 0.0, 255.0)
@@ -628,11 +647,12 @@ def sync_lip_validate(
             if driving_files is not None:
                 try:
                     image = cv2.imread(driving_files[i])[...,::-1]
+                    #image = cv2.imread(driving_files[0])[...,::-1]
                 except Exception as e:
                     break
                 w = h = 512
                 image = cv2.resize(image, (w,h))
                 output = cv2.resize(output, (w,h))
                 output = merge_from_two_image(image, output)
-                #output = np.concatenate((output, image), axis = 0)
+                output = np.concatenate((output, image), axis = 0)
             writer.append_data(np.uint8(output))

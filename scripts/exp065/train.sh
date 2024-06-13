@@ -8,9 +8,9 @@ mkdir -p results
 
 function main
 {
-    CUDA_VISIBLE_DEVICES=5 python -m TalkingFace \
+    CUDA_VISIBLE_DEVICES=$1 python -m TalkingFace \
                            --config_path `pwd`/scripts/${exp_name}/config.yaml \
-                           --save_path `pwd`/results/${exp_name}
+                           --save_path `pwd`/results/${exp_name} 
 }
 
 if [ ! -d "log/${exp_name}" ]; then
@@ -19,4 +19,5 @@ if [ ! -d "log/${exp_name}" ]; then
 fi
 
 _timestamp=`date +%Y%m%d%H`
-main
+
+main 0

@@ -1,29 +1,39 @@
 #landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/lm2d.npy"
 #landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/tx/ldm_renorm.npy"
-landmarks_path: "/data1/Dataset/chenlong/tx/tx_lm2d.npy"
+#landmarks_path: "/data1/Dataset/chenlong/tx/tx_lm2d.npy"
 #landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_ADt.npy"
 #landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_paT.npy"
 #landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_OPG.npy"
-#landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_xmS.npy"
+landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_xmS.npy"
 #landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/shutup.npy"
 #landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/transformed.npy"
-landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_ooA.npy"
+#landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_OKG.npy"
 
 net:
     config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp062/config.yaml"
     weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp062/snapshots/best.pth"
 
 pti:
-    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pivot_028/snapshots/"
+    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pivot_043/snapshots/"
     #weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/man3/pti/snapshots/"
+    #weight: "/data1/chenlong/0517/video/0522/2/results/man3_chenl_0521/man3_pivot_512/snapshots/"
+    #weight: "/data1/chenlong/0517/video/0522/2/results/man3_chenl_0521/man3_pivot_512/snapshots/"
 
 attr_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/attr.pt"
 #attr_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/man3/attribute.pt"
+#attr_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/man3/attribute-chenlong.pt"
+
+#e4e_path: "/data1/chenlong/0517/video/0522/2/results/man3_chenl_0521/cache.pt"
+#pose_latent_path: "/data1/chenlong/0517/video/0522/2/results/man3_chenl_0521/pose"
+#pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/man3/pose_stabled"
 e4e_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/id.pt"
-#e4e_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/man3/id.pt"
+#pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pose_finetuning_023/pose"
 pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pose_finetuning_020_stable/pose_stabled"
-#pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pose_finetuning_010_stable/pose_stabled"
 #pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/man3/pose"
+
+
+#video_landmark: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/man3/ldm3_chenlong.npy"
+#video_landmark: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/lm2d_e4e.npy"
 video_landmark: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/lm2d_e4e.npy"
 #video_landmark: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_Ygq.npy"
 #video_landmark: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/man3/ldm3d.npy"
@@ -32,5 +42,5 @@ video_landmark: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/ex
 #driving_images_dir: "/data1/Dataset/chenlong/tx/frames/smooth"
 driving_images_dir: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/exp010/0/data/smooth"
 #driving_images_dir: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/exp010/0/e4e"
-#driving_images_dir: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/man3/data/smooth"
+#driving_images_dir: "/data1/chenlong/0517/video/0522/2/results/man3_chenl_0521/data/smooth"
 resolution: 512

@@ -123,7 +123,7 @@ def deploy(
     logger.info(f"max error {diff.max()}, min error {diff.min()}, avg error {diff.mean()}")
     #module.save(to_path_model)
     onnx_model_path = to_path_model.replace('pt', 'onnx')
-    torch.onnx.export(model, (_input, style_space), onnx_model_path, verbose = True, opset_version = 16, do_constant_folding = True)
+    torch.onnx.export(model, (_input, style_space), onnx_model_path, verbose = True, opset_version = 15, do_constant_folding = True)
     logger.info("get landmark.")
 
     output_onnx = onnx_infer(onnx_model_path, _input, style_space)
