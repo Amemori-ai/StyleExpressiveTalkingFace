@@ -14,7 +14,7 @@ net:
     weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp062/snapshots/best.pth"
 
 pti:
-    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pivot_043/snapshots/"
+    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pivot_044/snapshots/"
     #weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/man3/pti/snapshots/"
     #weight: "/data1/chenlong/0517/video/0522/2/results/man3_chenl_0521/man3_pivot_512/snapshots/"
     #weight: "/data1/chenlong/0517/video/0522/2/results/man3_chenl_0521/man3_pivot_512/snapshots/"

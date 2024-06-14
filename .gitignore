@@ -13,7 +13,7 @@
 tags
 
 tests/*.mp4
-                        
+scripts/exp*                       
 
 # soft link
 codes
