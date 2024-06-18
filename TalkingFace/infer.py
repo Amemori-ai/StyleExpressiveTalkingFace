@@ -9,6 +9,8 @@ __all__ = ['infer']
 def infer(
             config_path: str,
             save_path: str,
+            blender: object = None,
+            frames: int = -1
          ):
 
     with open(config_path) as f:
@@ -34,7 +36,9 @@ def infer(
     pti_exp_name = list(filter(lambda x: 'exp' in x or 'pivot' in x or 'pti' in x, pti_weight.split('/')))[0]
     pose_exp_name = pose_latent_path.split('/')[-2]
 
-    save_path = os.path.join(save_path, net_exp_name + '_' + pti_exp_name + '_' + pose_exp_name +  '.mp4')
+
+    if not save_path.endswith("mp4"):
+        save_path = os.path.join(save_path, net_exp_name + '_' + pti_exp_name + '_' + pose_exp_name +  '.mp4')
     driving_images_dir = None
     if hasattr(config, "driving_images_dir"):
         driving_images_dir = config.driving_images_dir
@@ -50,7 +54,9 @@ def infer(
                       save_path,
                       video_landmark_path,
                       driving_images_dir,
-                      resolution = config.resolution
+                      resolution = config.resolution,
+                      blender = blender,
+                      frames = frames if not hasattr(config, "frames") else config.frames
                      )
 @click.command()
 @click.option('--config_path')

@@ -17,6 +17,9 @@ import numpy as np
 from functools import partial
 from typing import Callable, Union, List
 from easydict import EasyDict as edict
+from PIL import Image
+
+
 from DeepLog import logger, Timer
 from torchvision import transforms
 from torch.utils.data import DataLoader, ConcatDataset
@@ -31,10 +34,14 @@ sys.path.insert(0, os.path.join(where_am_i, "ExpressiveVideoStyleGanEncoding"))
 
 from ExpressiveEncoding.train import StyleSpaceDecoder, stylegan_path, from_tensor,\
                                      PoseEdit, get_detector, get_face_info, \
-                                     gen_masks, to_tensor, imageio
+                                     gen_masks, to_tensor, imageio, \
+                                     get_face_info
 
 from .module import BaseLinear
 from .equivalent_offset import fused_offsetNet
+
+from .FaceParsing.model import BiSeNet
+
 
 psnr_func = lambda x,y: 20 * torch.log10(1.0 / torch.sqrt(torch.mean((x - y) ** 2)))
 #norm = lambda x: x
@@ -86,6 +93,33 @@ size_of_alpha = 0
 for k,v in alphas[:8]:
     size_of_alpha += len(v)
 
+where_am_i = os.path.dirname(os.path.realpath(__file__))
+class face_parsing:
+    def __init__(self, path = os.path.join(where_am_i, "ExpressiveVideoStyleGanEncoding", "ExpressiveEncoding", "third_party", "models", "79999_iter.pth")):
+
+        net = BiSeNet(19) 
+        state_dict = torch.load(path)
+        net.load_state_dict(state_dict)
+        net.eval()
+        net.to("cuda:0")
+        self.net = net
+        self.to_tensor = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        ])
+
+    def __call__(self, x):
+
+        h, w = x.shape[:2]
+        x = Image.fromarray(x)
+        image = x.resize((512, 512), Image.BILINEAR)
+        img = self.to_tensor(image).unsqueeze(0).to("cuda:0")
+        out = self.net(img)[0].detach().squeeze(0).cpu().numpy().argmax(0)
+        mask = np.zeros_like(out)
+        for label in list(range(1,  7)) + list(range(10, 16)):
+            mask[out == label] = 1
+        out = cv2.resize(mask, (w,h))
+        return out
 
 class augmentation:
     def __init__(self, 
@@ -353,8 +387,17 @@ def update_region_offset(
     dlatents_tmp = [latent.clone() for latent in dlatents]
     count = 0
     #first 5 elements.
+    forbidden_list = [
+                      ( 6, 378 ),
+                      ( 5, 50 ),
+                      ( 5, 505 )
+                     ]
+
     for k, v in alphas[region_range[0]:region_range[1]]:
         for i in v:
+            if tuple([k, i]) in forbidden_list:
+                logger.info(f"{k} {i} is forbidden.")
+                continue
             dlatents_tmp[k][:, i] = dlatents[k][:, i] + offset[:,count]
             count += 1
     return dlatents_tmp
@@ -366,9 +409,18 @@ def update_region_offset_v2(
                         ):
     dlatents_tmp = [torch.zeros_like(latent) for latent in dlatents]
     count = 0
+    forbidden_list = []
+    #forbidden_list = [
+    #                  ( 6, 378 ),
+    #                  ( 5, 50 ),
+    #                  ( 5, 505 )
+    #                 ]
     #first 5 elements.
     for k, v in alphas[region_range[0]:region_range[1]]:
         for i in v:
+            if tuple([k, i]) in forbidden_list:
+                logger.info(f"{k} {i} is forbidden.")
+                continue
             dlatents_tmp[k][:, i] = offset[:,count]
             count += 1
     return [(x, y) for (x,y) in zip(dlatents, dlatents_tmp)]
@@ -613,10 +665,13 @@ def sync_lip_validate(
         driving_files = sorted(os.listdir(driving_images_dir), key = lambda x: int(''.join(re.findall('[0-9]+', x))))
         driving_files = [os.path.join(driving_images_dir, x) for x in driving_files]
 
-    logger.info(landmark_offsets.shape)
-    n = min(landmark_offsets.shape[0], len(attributes), len(os.listdir(pose_latent_path)))
+
+    frames = kwargs.get("frames", -1)
+    n = min(landmark_offsets.shape[0], len(attributes), len(os.listdir(pose_latent_path))) if frames == -1 else frames
     t = Timer()
     p_bar = tqdm.tqdm(range(n))
+    detector = get_detector()
+    face_parse_func = face_parsing()
     with imageio.get_writer(save_path, fps = 25) as writer:
         for i in p_bar:
             attribute = attributes[i]
@@ -625,6 +680,7 @@ def sync_lip_validate(
             style_space_latent = decoder.get_style_space(w_plus_with_pose)
             landmark_offset = torch.from_numpy(landmark_offsets[i]).unsqueeze(0).float().to(device)
             #ss_updated = update_region_offset_v2(style_space_latent, torch.tensor(attribute[1]).reshape(1, -1).to(device), [0, len(alphas)])
+
             ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1][size_of_alpha:]).reshape(1, -1).to(device), [8, len(alphas)])
             with torch.no_grad():
                 offset = net(landmark_offset)
@@ -653,6 +709,13 @@ def sync_lip_validate(
                 w = h = 512
                 image = cv2.resize(image, (w,h))
                 output = cv2.resize(output, (w,h))
-                output = merge_from_two_image(image, output)
+                mask = face_parse_func(image)
+                #mask = face_parsing()(output)
+                #face_info_from_driving_image = get_face_info(image, detector)   
+                #mask = gen_masks(face_info_from_driving_image.landmarks, image)["chin"]
+
+                blender = kwargs.get("blender", None)
+                output = merge_from_two_image(image, output, mask = mask, blender = blender)
+                #output = merge_from_two_image(image, output)
                 output = np.concatenate((output, image), axis = 0)
             writer.append_data(np.uint8(output))
