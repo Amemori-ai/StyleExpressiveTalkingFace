@@ -10,39 +10,49 @@ landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/la
 #landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_OKG.npy"
 
 net:
-    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp065/config.yaml"
-    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp065/snapshots/best.pth"
-
+    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp062/config.yaml"
+    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp062/snapshots/best.pth"
+    #weight: "/data1/chenlong/local_code/StyleExpressiveTalkingFace-master/results/man3_s0_20240118_set/snapshots/best.pth"
 pti:
-    #weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pivot_027/snapshots/"
+    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pivot_027/snapshots/"
     #weight: "/data1/chenlong/0517/video/0522/kanghui_0/results/kanghui_w_speed/pti/w_snapshots/"
     #weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/man3/pti/snapshots/"
-    weight: "/data1/chenlong/0517/video/0522/2/results/man3_chenl_0521/man3_pivot_512/snapshots/"
     #weight: "/data1/chenlong/0517/video/0522/2/results/man3_chenl_0521/man3_pivot_512/snapshots/"
+    #weight: "/data1/chenlong/0517/video/0522/2/results/man3_chenl_0521/man3_pivot_512/snapshots/"
+    #weight: "/data1/chenlong/0517/public_model_exp/man3_s0_20240118/results/pti_ft_512/snapshots/"
 
-#attr_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/attr.pt"
+attr_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/attr.pt"
 #attr_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/man3/attribute.pt"
-attr_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/man3/attribute-chenlong.pt"
+#attr_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/man3/attribute-chenlong.pt"
+#attr_path: "/data1/chenlong/local_code/StyleExpressiveTalkingFace-master/dataset/man3_s0_20240118_set/attribute.pt"
 
-e4e_path: "/data1/chenlong/0517/video/0522/2/results/man3_chenl_0521/cache.pt"
-pose_latent_path: "/data1/chenlong/0517/video/0522/2/results/man3_chenl_0521/pose"
+#e4e_path: "/data1/chenlong/0517/video/0522/2/results/man3_chenl_0521/cache.pt"
+#e4e_path: "/data1/chenlong/local_code/StyleExpressiveTalkingFace-master/dataset/man3_s0_20240118_set/id.pt"
+#pose_latent_path: "/data1/chenlong/0517/public_model_exp/man3_s0_20240118/results/pose"
 #pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/man3/pose_stabled"
-#e4e_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/id.pt"
-#pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pose_finetuning_027/pose"
-#pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pose_finetuning_020_stable/pose_stabled"
+e4e_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/id.pt"
+#ose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pose_finetuning_027/pose"
+pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pose_finetuning_020_stable/pose_stabled"
 #pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/man3/pose"
 
 
-video_landmark: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/man3/ldm3_chenlong.npy"
-#video_landmark: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/lm2d_e4e.npy"
+#video_landmark: "/data1/chenlong/local_code/StyleExpressiveTalkingFace-master/dataset/man3_s0_20240118_set/lm3d_e4e.npy"
+video_landmark: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/lm2d_e4e.npy"
 #video_landmark: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/lm2d_e4e.npy"
 #video_landmark: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_Ygq.npy"
 #video_landmark: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/man3/ldm3d.npy"
 #driving_images_dir: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/exp010/0/driving_video_cut/smooth/"
 
 #driving_images_dir: "/data1/Dataset/chenlong/tx/frames/smooth"
-#driving_images_dir: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/exp010/0/data/smooth"
+driving_images_dir: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/exp010/0/data/smooth"
 #driving_images_dir: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/exp010/0/e4e"
-driving_images_dir: "/data1/chenlong/0517/video/0522/2/results/man3_chenl_0521/data/smooth"
+#driving_images_dir: "/data1/chenlong/0517/video/0522/2/results/man3_chenl_0521/data/smooth"
+#driving_images_dir: "/data1/Dataset/DingZhi/s3_data/amemori-digital-human-autopipe/training_data/online_model/man3_s0_20240118/dataset/train/smooth/1"
 resolution: 512
 frames: -1
+
+
+#/data1/chenlong/local_code/StyleExpressiveTalkingFace-master/dataset/man3_s0_20240118_set
+
+
+

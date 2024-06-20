@@ -1,7 +1,8 @@
 click
 easydict
 opencv-python-headless
-imageio
+imageio==2.34.0
+imageio-ffmpeg==0.4.9
 mediapipe
 torchdiffeq
 trimesh
@@ -9,3 +10,4 @@ face_alignment
 onnxruntime
 kornia
 scikit-learn
+numpy<2.0.0

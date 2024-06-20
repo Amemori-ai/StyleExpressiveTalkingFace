@@ -40,7 +40,7 @@ from ExpressiveEncoding.train import StyleSpaceDecoder, stylegan_path, from_tens
 from .module import BaseLinear
 from .equivalent_offset import fused_offsetNet
 
-from .FaceParsing.model import BiSeNet
+from ExpressiveEncoding.loss.FaceParsing.model import BiSeNet
 
 
 psnr_func = lambda x,y: 20 * torch.log10(1.0 / torch.sqrt(torch.mean((x - y) ** 2)))
@@ -115,7 +115,7 @@ class face_parsing:
         image = x.resize((512, 512), Image.BILINEAR)
         img = self.to_tensor(image).unsqueeze(0).to("cuda:0")
         out = self.net(img)[0].detach().squeeze(0).cpu().numpy().argmax(0)
-        mask = np.zeros_like(out)
+        mask = np.zeros_like(out).astype(np.float32)
         for label in list(range(1,  7)) + list(range(10, 16)):
             mask[out == label] = 1
         out = cv2.resize(mask, (w,h))
@@ -387,17 +387,17 @@ def update_region_offset(
     dlatents_tmp = [latent.clone() for latent in dlatents]
     count = 0
     #first 5 elements.
-    forbidden_list = [
-                      ( 6, 378 ),
-                      ( 5, 50 ),
-                      ( 5, 505 )
-                     ]
-
+    #forbidden_list = [
+    #                  ( 6, 378 ),
+    #                  ( 5, 50 ),
+    #                  ( 5, 505 )
+    #                 ]
+    #forbidden_list = []
+    #if tuple([k, i]) in forbidden_list:
+    #    logger.info(f"{k} {i} is forbidden.")
+    #    continue
     for k, v in alphas[region_range[0]:region_range[1]]:
         for i in v:
-            if tuple([k, i]) in forbidden_list:
-                logger.info(f"{k} {i} is forbidden.")
-                continue
             dlatents_tmp[k][:, i] = dlatents[k][:, i] + offset[:,count]
             count += 1
     return dlatents_tmp
@@ -650,7 +650,15 @@ def sync_lip_validate(
     decoder.to(device)
     attributes = torch.load(attributes_path)
     get_disentangled_landmarks = DisentangledLandmarks()
-    _, selected_id_image, selected_id_latent, selected_id = torch.load(e4e_latent_path)
+    id_path = e4e_latent_path.replace("pt", "txt")
+    if os.path.exists(id_path):
+        with open(id_path, 'r') as f:
+            selected_id = int(f.readlines()[0].strip())
+    else:
+        _, selected_id_image, selected_id_latent, selected_id = torch.load(e4e_latent_path)
+        with open(id_path, 'w') as f:
+            f.write(str(selected_id))
+
     if isinstance(landmarks, str):
         landmarks = np.load(landmarks)[...,:2]
     # hard code id video landmarks.

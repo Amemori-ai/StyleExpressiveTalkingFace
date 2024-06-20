@@ -11,7 +11,9 @@ docker run  \
        --exp_name $expname\
        --decoder_path \
        $decoder_path \
-      --to_path /app/release
+      --to_path /app/release \
+      --pwd /data1/wanghaoran/Amemori/ExpressiveVideoStyleGanEncoding
+
 
 aws s3 sync release/$expname  s3://update-weights/model/Voice2Lip_v1.3.1/$expname
 # /app/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pivot_027/snapshots/100.pth \

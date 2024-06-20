@@ -12,6 +12,7 @@ import pickle
 import cv2
 import copy
 import shutil
+import imageio
 
 import numpy as np 
 
@@ -19,7 +20,8 @@ from itertools import chain
 
 from easydict import EasyDict as edict 
 from TalkingFace.aligner import offsetNet, size_of_alpha, alphas, \
-                                update_lip_region_offset, logger, update_region_offset
+                                update_lip_region_offset, logger, update_region_offset, \
+                                face_parsing
                                 
 from TalkingFace.ExpressiveVideoStyleGanEncoding.ExpressiveEncoding.train import stylegan_path
 from TalkingFace.ExpressiveVideoStyleGanEncoding.ExpressiveEncoding.equivalent_decoder import EquivalentStyleSpaceDecoder
@@ -84,11 +86,28 @@ class TalkingFaceModel(torch.nn.Module):
         ss_updated = update_lip_region_offset(latent, offset)
         image = self.decoder(ss_updated)
         return torch.nn.functional.interpolate(image, (512,512))
-    
+
+def get_blend_mask(
+                     image: np.ndarray,
+                     face_parse: object
+                  ):
+    image = cv2.resize(image, (512, 512))
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    mask = face_parse(image)
+    erosion_size = 20
+    element = cv2.getStructuringElement(cv2.MORPH_RECT, (2 * erosion_size + 1, 2 * erosion_size + 1), (erosion_size, erosion_size))
+    mask_erosion = cv2.erode(mask, element)
+
+    mask = cv2.boxFilter(mask_erosion.astype(np.float32), -1, ksize = (21, 21))
+    if mask.ndim < 3:
+        mask = mask[..., np.newaxis]
+    return mask * 255.0
+
 def deploy(
             exp_name: str,
             decoder_path: str,
-            to_path: str
+            to_path: str,
+            pwd: str
           ):
     
     #assert os.path.isdir(to_path), "to_path expected is directory."
@@ -99,13 +118,16 @@ def deploy(
     to_path_model = os.path.join(to_path, 'model.pt') 
     to_path_landmark = os.path.join(to_path, 'landmark.npy') 
     to_path_latents = os.path.join(to_path, 'latents.pkl') 
+    to_path_masks = os.path.join(to_path, "templates", "blend_masks.mp4")
+    os.makedirs(os.path.dirname(to_path_masks), exist_ok = True)
 
     net_config_path = os.path.join(current_path, 'scripts', exp_name, 'config.yaml')
     net_snapshots_path = os.path.join(current_path, 'results', exp_name, 'snapshots', 'best.pth')
 
     with open(net_config_path) as f:
         config = edict(yaml.load(f, Loader = yaml.CLoader))
-
+    
+    face_parse = face_parsing()
     model = TalkingFaceModel(config.net, net_snapshots_path, decoder_path)
     model.eval()
     device = 'cpu'
@@ -129,7 +151,7 @@ def deploy(
     output_onnx = onnx_infer(onnx_model_path, _input, style_space)
     diff = np.abs(output_original.detach().cpu().numpy() - output_onnx)
     logger.info(f"max error {diff.max()}, min error {diff.min()}, avg error {diff.mean()}")
-    _, _, _, selected_id = torch.load(os.path.join(current_path, config.data[0].dataset.id_path))
+    gen_file_list, _, _, selected_id = torch.load(os.path.join(current_path, config.data[0].dataset.id_path))
     landmarks = np.load(os.path.join(current_path, config.data[0].dataset.ldm_path))
     offsets = norm((landmarks - landmarks[selected_id - 1: selected_id, ...])[:, 48:68, ...])
     #np.save(to_path_landmark, landmark)
@@ -141,8 +163,14 @@ def deploy(
     n = len(attributes)
     p_bar = tqdm.tqdm(range(n))
     to_save_list = []
+    writer = imageio.get_writer(to_path_masks, fps = 25)
+
     model.to("cuda:0")
     for i in p_bar:
+
+        image_path = os.path.join(pwd, gen_file_list[i])
+        mask = get_blend_mask(cv2.imread(image_path), face_parse)
+        writer.append_data(mask)
         attribute = attributes[i]
         w_plus_with_pose = pose_latents[i]
         style_space_latent = model.decoder.get_style_space(w_plus_with_pose)
@@ -167,7 +195,7 @@ def deploy(
             for index, z in enumerate(ss_updated):
                 z = z.detach().cpu().numpy()
                 to_save_list[index][i:i+1, :] = z
-
+    #np.save(to_path_masks, to_save_mask)
     with open(to_path_latents, 'wb') as f:
         pickle.dump(to_save_list, f, protocol = 4)
 
@@ -175,12 +203,14 @@ def deploy(
 @click.option('--exp_name')
 @click.option('--decoder_path')
 @click.option('--to_path')
+@click.option('--pwd', default = None)
 def _invoker_deploy(
                     exp_name,
                     decoder_path,
-                    to_path
+                    to_path,
+                    pwd
                    ):
-    return deploy(exp_name, decoder_path, to_path)
+    return deploy(exp_name, decoder_path, to_path, pwd)
 
 if __name__ == '__main__':
     _invoker_deploy()

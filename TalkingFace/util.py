@@ -40,13 +40,15 @@ def merge_from_two_image(
         mask = np.uint8(mask)
 
         # dilate
-        erosion_size = 10
+        erosion_size = 15
         element = cv2.getStructuringElement(cv2.MORPH_RECT, (2 * erosion_size + 1, 2 * erosion_size + 1), (erosion_size, erosion_size))
         mask_erosion = cv2.erode(mask, element)
+
         dilate_size = 5
         element = cv2.getStructuringElement(cv2.MORPH_RECT, (2 * dilate_size + 1, 2 * dilate_size + 1), (dilate_size, dilate_size))
         mask_dilate = cv2.dilate(mask, element)
         mask_diff = (mask_dilate - mask_erosion)[..., np.newaxis]
+        #mask_diff = mask - mask_erosion[..., np.newaxis]
 
         if blender is not None:
             output = blender(master, slave, np.uint8(mask_diff * 255))
@@ -55,13 +57,17 @@ def merge_from_two_image(
                 mask_diff = mask_diff[..., np.newaxis]
             slave = output * mask_diff + (1 - mask_diff) * slave
         else:
-            mask_diff = cv2.boxFilter(mask_diff.astype(np.float32), -1, ksize = (21, 21))
-            if mask_diff.ndim < 3:
-                mask_diff = mask_diff[..., np.newaxis]
-            slave = master * mask_diff + (1 - mask_diff) * slave
+            pass
+            #mask_diff = cv2.boxFilter(mask_diff.astype(np.float32), -1, ksize = (21, 21))
+            #if mask_diff.ndim < 3:
+            #    mask_diff = mask_diff[..., np.newaxis]
+            #slave = master * mask_diff + (1 - mask_diff) * slave
             #mask = cv2.GaussianBlur(mask, (101, 101), 11)
             #if mask.ndim < 3:
             #    mask = mask[..., np.newaxis]
+        mask = cv2.boxFilter(mask_erosion.astype(np.float32), -1, ksize = (21, 21))
+        if mask.ndim < 3:
+            mask = mask[..., np.newaxis]
         merge_mask = mask
     else:
         merge_mask = np.zeros_like(master)
