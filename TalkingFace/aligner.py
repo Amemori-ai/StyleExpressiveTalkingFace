@@ -723,7 +723,7 @@ def sync_lip_validate(
                 #mask = gen_masks(face_info_from_driving_image.landmarks, image)["chin"]
 
                 blender = kwargs.get("blender", None)
-                output = merge_from_two_image(image, output, mask = mask, blender = blender)
+                #output = merge_from_two_image(image, output, mask = mask, blender = blender)
                 #output = merge_from_two_image(image, output)
                 output = np.concatenate((output, image), axis = 0)
             writer.append_data(np.uint8(output))

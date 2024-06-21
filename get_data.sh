@@ -11,12 +11,12 @@ directory=dataset/${exp_name}
 ln -s ${ROOT_PATH}/${exp_name}/cache.pt ${directory}/id.pt
 
 # get e4e landmark
-python get_landmarks.py --from_path ${ROOT_PATH}/${exp_name}/e4e/  \
-                        --to_path ${directory}/lm3d_e4e.npy
+python get_landmarks.py --from_path ${ROOT_PATH}/${exp_name}/data/smooth/  \
+                        --to_path ${directory}/lm3d.npy
 
 # get id landmark
 python get_id_landmarks.py --id_path ${directory}/id.pt \
-                           --landmark_path ${directory}/lm3d_e4e.npy \
+                           --landmark_path ${directory}/lm3d.npy \
                            --to_path ${directory}/id_landmark.npy
 # get pose pt
 python merge_more2one.py ${ROOT_PATH}/pose ${directory}/pose.pt
@@ -31,7 +31,7 @@ python tools/get_validate_data.py --from_path ${directory}/attribute.pt \
                                   --ratio 0.1
 
 # landmark
-python tools/get_validate_data.py --from_path ${directory}/lm3d_e4e.npy \
+python tools/get_validate_data.py --from_path ${directory}/lm3d.npy \
                                   --from_path ${diretory} \
                                   --ratio 0.1
 # get training scripts
