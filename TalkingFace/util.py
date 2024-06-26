@@ -51,11 +51,11 @@ def merge_from_two_image(
         #mask_diff = mask - mask_erosion[..., np.newaxis]
 
         if blender is not None:
-            output = blender(master, slave, np.uint8(mask_diff * 255))
-            mask_diff = cv2.GaussianBlur(mask_diff, (101, 101), 11)
-            if mask_diff.ndim < 3:
-                mask_diff = mask_diff[..., np.newaxis]
-            slave = output * mask_diff + (1 - mask_diff) * slave
+            slave = blender(slave, master, np.uint8(mask_diff * 255))
+            #mask_diff = cv2.GaussianBlur(mask_diff, (101, 101), 11)
+            #if mask_diff.ndim < 3:
+            #    mask_diff = mask_diff[..., np.newaxis]
+            #slave = output * mask_diff + (1 - mask_diff) * slave
         else:
             pass
             #mask_diff = cv2.boxFilter(mask_diff.astype(np.float32), -1, ksize = (21, 21))

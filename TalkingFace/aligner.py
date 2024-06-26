@@ -22,6 +22,7 @@ from PIL import Image
 
 from DeepLog import logger, Timer
 from torchvision import transforms
+from torchvision.utils import make_grid
 from torch.utils.data import DataLoader, ConcatDataset
 from TalkingFace.util import merge_from_two_image
 
@@ -220,11 +221,11 @@ class offsetNet(nn.Module):
             if '_max' in kwargs and '_min' in kwargs:
                 _min, _max = torch.tensor(kwargs['_min'], dtype = torch.float32), torch.tensor(kwargs['_max'], dtype = torch.float32)
             else:
-                _min = torch.zeros((1,1,2))
-                _max = torch.zeros((1,1,2))
+                _min = torch.zeros((1,1, 2))
+                _max = torch.zeros((1,1, 2))
             self.register_buffer('_min', _min)
             self.register_buffer('_max', _max)
-
+        print(self._min.shape, self._max.shape)
         self.norm_type = norm_type
         self.norm = norm_func
         self.register_buffer("clip_values", torch.ones((out_channels, 2), dtype = torch.float32))
@@ -326,7 +327,7 @@ class Dataset:
         return torch.tensor(clip_values)
 
     def get_offset_range(self, x):
-        return np.min(x, axis = (0, 1), keepdims = True), np.max(x, axis = (0, 1), keepdims = True)
+        return np.min(x, axis = (0,1), keepdims = True), np.max(x, axis = (0,1), keepdims = True)
 
     def __getitem__(
                     self,
@@ -445,9 +446,14 @@ def aligner(
     os.makedirs(tensorboard_path, exist_ok = True)
     device = "cuda:0"
     writer = SummaryWriter(tensorboard_path)
-    decoder = StyleSpaceDecoder(stylegan_path).to(device)
+    decoder = StyleSpaceDecoder(stylegan_path, to_resolution = 512).to(device)
     for p in decoder.parameters():
-        p.requires_grad = True
+        p.requires_grad = False
+    pti_weight_path = config.pti_weight_path
+    folder = os.path.dirname(pti_weight_path)
+    pti_weight = os.path.join(folder, sorted(os.listdir(pti_weight_path), key = lambda x: int(''.join(re.findall('[0-9]+', x))))[-1])
+    decoder.load_state_dict(torch.load(pti_weight), False)
+    decoder.to(device)
 
     datasets_list = []
     for _config in config.data:
@@ -486,6 +492,7 @@ def aligner(
                    ) 
 
     best_nme = 100.0
+    best_psnr = 0.0
     best_acc = 0.0
     if resume_path is not None:
         logger.info(f"resume training from {resume_path}")
@@ -524,30 +531,48 @@ def aligner(
     pbar = tqdm(range(start_epoch, config.epochs + start_epoch))
     total_count = 0
     last_path = None
+
+    pose_path = config.pose_path
+    attr_path = config.attr_path
+    poses = torch.load(os.path.join(current_pwd, pose_path))
+    attributes = torch.load(os.path.join(current_pwd, attr_path)) 
+    attribute = attributes[0]
+
     for epoch in pbar:
         for idx, data in enumerate(dataloader):
+
             attr, offset = data
             attr = attr.to(device)
             offset = offset.to(device)
             d_loss_value = 0.0
             pred_attr = net(offset)
 
+            n = attr.shape[0]
+            w_with_pose = poses[0].repeat(n,1,1)
+            style_space_latent = decoder.get_style_space(w_with_pose)
+            ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1][size_of_alpha:]).reshape(1, -1).to(device).repeat(n, 1), [8, len(alphas)])
+            ss_updated_pred = update_lip_region_offset(ss_updated, pred_attr, version = 'v2')
+            ss_updated_gt = update_lip_region_offset(ss_updated, attr, version = 'v2')
+            image = decoder(ss_updated_pred)
+            image_gt = decoder(ss_updated_gt)
+
             attr = (attr - net.clip_values[:, 0]) / (net.clip_values[:, 1] - net.clip_values[:, 0])
             pred_attr = (pred_attr - net.clip_values[:, 0]) / (net.clip_values[:, 1] - net.clip_values[:, 0])
-
-            d_loss_value = 1 - loss_d(pred_attr, attr).mean() #(1 - loss_d(torch.sign(pred_attr), torch.sign(attr)).mean())
             i_loss_value = loss_i(attr, pred_attr)
-             #loss_d(torch.sigmoid(pred_attr), (attr >= 0).to(torch.float32)) #(1 - loss_d(torch.sign(pred_attr), torch.sign(attr)).mean())
+            image_loss_value = loss_i(image, image_gt)
 
-            loss_value = i_loss_value * 1.0 + d_loss_value * 0.0
+            loss_value = i_loss_value * 1.0 + image_loss_value * 1.0
             loss_value.backward()
             optimizer.step()
             total_count += 1
 
             if idx % config.show_internal == 0:
-                logger.info(f"epoch:{epoch}: {idx+1}/{len(dataloader)} loss {loss_value.mean().item()}, d_loss {d_loss_value.mean().item()} i_loss {i_loss_value.mean().item()} ")
+                logger.info(f"epoch:{epoch}: {idx+1}/{len(dataloader)} loss {loss_value.mean().item()}, image_loss {image_loss_value.mean().item()} i_loss {i_loss_value.mean().item()} ")
                 writer.add_scalar("loss", loss_value.mean().item(), total_count)
+                images_in_training = torch.cat((image, image_gt), dim =2)
+                writer.add_image(f'image', make_grid(images_in_training.detach(),normalize=True, scale_each=True), total_count)
 
+        psnr_value = 0.0
         nme_value = 0.0
         acc_value = 0.0
         sim_value = 0.0
@@ -563,27 +588,41 @@ def aligner(
             if isinstance(pred_attr, tuple):
                 pred_attr = pred_attr[0]
 
+            n = attr.shape[0]
+            w_with_pose = poses[0].repeat(n,1,1)
+            style_space_latent = decoder.get_style_space(w_with_pose)
+            ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1][size_of_alpha:]).reshape(1, -1).to(device).repeat(n, 1), [8, len(alphas)])
+            ss_updated_pred = update_lip_region_offset(ss_updated, pred_attr, version = 'v2')
+            ss_updated_gt = update_lip_region_offset(ss_updated, attr, version = 'v2')
+            image = decoder(ss_updated_pred)
+            image_gt = decoder(ss_updated_gt)
             #pred_attr = (pred_attr * (net.clip_values[:, 1] - net.clip_values[:, 0])) + net.clip_values[:, 0]
             acc_value += (torch.sign(pred_attr) == torch.sign(attr)).to(torch.float32).mean()
             attr = (attr - net.clip_values[:, 0]) / (net.clip_values[:, 1] - net.clip_values[:, 0])
             pred_attr = (pred_attr - net.clip_values[:,0]) / (net.clip_values[:,1] - net.clip_values[:,0])
 
+            psnr_value += psnr_func(image, image_gt)
             nme_value += torch.nn.functional.mse_loss(attr, pred_attr).mean()
             sim_value += torch.nn.functional.cosine_similarity(pred_attr, attr).mean()
+
         nme_value /= len(val_dataloader)
         acc_value /= len(val_dataloader)
         sim_value /= len(val_dataloader)
+        psnr_value /= len(val_dataloader)
+
         rnme_value = torch.sqrt(nme_value).item()
         nme_value = nme_value.item()
         acc_value = acc_value.item()
         sim_value = sim_value.item()
-        logger.info(f"nme is {nme_value}, acc is {acc_value}, sim is {sim_value} rnme is {rnme_value}.")
+        psnr_value = psnr_value.item()
+        logger.info(f"nme is {nme_value}, acc is {acc_value}, sim is {sim_value} rnme is {rnme_value}. psnr is {psnr_value}")
         writer.add_scalar("nme", nme_value ,global_step = epoch)
+        writer.add_scalar("psnr", psnr_value ,global_step = epoch)
         net.train()
-        if nme_value < best_nme:
+        if psnr_value > best_psnr:
             last_path =  os.path.join(snapshots, "best.pth")
-            best_nme = nme_value
-            torch.save(dict(weight = net.state_dict(), best_value = best_nme, epoch = epoch), last_path)
+            best_psnr = psnr_value
+            torch.save(dict(weight = net.state_dict(), best_value = best_psnr, epoch = epoch), last_path)
             logger.info(f"{epoch} weight saved.")
         sche.step()
         writer.add_scalar("learning rate", optimizer.param_groups[0]['lr'] ,global_step = epoch)
@@ -723,7 +762,7 @@ def sync_lip_validate(
                 #mask = gen_masks(face_info_from_driving_image.landmarks, image)["chin"]
 
                 blender = kwargs.get("blender", None)
-                #output = merge_from_two_image(image, output, mask = mask, blender = blender)
+                output = merge_from_two_image(image, output, mask = mask, blender = blender)
                 #output = merge_from_two_image(image, output)
                 output = np.concatenate((output, image), axis = 0)
             writer.append_data(np.uint8(output))

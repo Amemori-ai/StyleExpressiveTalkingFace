@@ -50,7 +50,7 @@ def get_validate_data(
     train_path = os.path.join(to_path, "train")
     val_path = os.path.join(to_path, "val")
     
-    save(_obj[:length], train_path)
+    save(_obj, train_path)
     save(_obj[length:], val_path)
 
 

@@ -95,7 +95,7 @@ class BlenderNet(nn.Module):
         modules_enc = []
         modules_dec = []
         conv0 = nn.Conv2d(in_channels, base_channels, 3, 1, 1)
-        final = nn.Sequential(nn.Conv2d(base_channels, 3, 1, 1), nn.Tanh())
+        final = nn.Sequential(nn.Conv2d(base_channels, 2, 1, 1), nn.Tanh())
 
         in_size = _channels_dict[512]
         for _size in _size_list[::-1][1:]:
@@ -111,9 +111,15 @@ class BlenderNet(nn.Module):
     
         self.module = nn.Sequential(conv0, *modules_enc, *modules_dec, final)
 
-    def forward(self, x):
-    
-        return self.module(x)
+    def forward(self, x, y):
+        n, _, h, w = x.shape
+        offset = self.module(torch.cat((x,y), dim = 1))
+        i, j = torch.meshgrid(torch.Tensor(list(range(w))), torch.Tensor(list(range(h))), indexing = "xy")
+
+        i = ((i / (w -1)) - .5) / 0.5
+        j = ((j / (h -1)) - .5) / 0.5
+        grid = torch.stack((i, j), dim = 2).view(1, h, w, 2).repeat(n, 1, 1, 1).to(x) + offset.permute(0, 2, 3, 1)
+        return nn.functional.grid_sample(x, grid)
 
 class Dataset:
     def __init__(
@@ -238,15 +244,17 @@ def trainer(
             gt = gt.to(device)
             gen = gen.to(device)
             mask = mask.to(device)
-            fake = net(torch.cat((gt, gen, mask), dim = 1))
-            loss = loss_l2(fake * mask, gt * mask)
+            fake = net(gen, gt)
+            local_loss = loss_l2(fake * mask, gt * mask)
+            global_loss = loss_l2(fake, gt)
+            loss = local_loss + global_loss
             loss.backward()
             optimizer.step()
 
             if idx % config.internal == 0:
-                logger.info(f"{idx}/{epoch}/{epochs}: loss {loss.item()}")
+                logger.info(f"{idx}/{epoch}/{epochs}: loss(local) {local_loss.item()} loss(global) {global_loss.item()}. ")
                 writer.add_scalar("loss", loss.item(), total_iter)
-                images_in_training = torch.cat((fake * mask, gt * mask, gen * mask), dim =2)
+                images_in_training = torch.cat((fake, fake * mask, gt * mask, gen * mask), dim =2)
                 writer.add_image('image', make_grid(images_in_training.detach(),normalize=True, scale_each=True), total_iter)
                 loss_mean += loss.item()
                 counter += 1
@@ -278,7 +286,7 @@ def trainer(
                 y = norm(to_tensor(y))
                 _m = to_tensor(_m)
 
-                output = net(torch.cat((x, y, _m), dim = 1).to(device))
+                output = net(x.to(device), y.to(device))
                 return ((output.detach().squeeze().permute((1,2,0)).cpu().numpy() * 0.5) + 0.5) * 255.0
 
             infer(

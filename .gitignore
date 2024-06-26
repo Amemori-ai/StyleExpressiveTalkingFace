@@ -28,6 +28,8 @@ video/
 tests/puppet
 release/
 dataset/
+data_npy/
+deep_3drecon/
 
 
 # temp file.

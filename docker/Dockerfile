@@ -6,3 +6,5 @@ RUN ls /app/packages | xargs -i pip install /app/packages/{} --force-reinstall -
 
 RUN apt-get update && apt-get install ffmpeg libsm6 libxext6 -y
 
+CMD [bash, xxx.sh]
+

@@ -153,7 +153,7 @@ def deploy(
     logger.info(f"max error {diff.max()}, min error {diff.min()}, avg error {diff.mean()}")
     gen_file_list, _, _, selected_id = torch.load(os.path.join(current_path, config.data[0].dataset.id_path))
     landmarks = np.load(os.path.join(current_path, config.data[0].dataset.ldm_path))
-    offsets = norm((landmarks - landmarks[selected_id - 1: selected_id, ...])[:, 48:68, ...])
+    #offsets = norm((landmarks - landmarks[selected_id - 1: selected_id, ...])[:, 48:68, ...])
     #np.save(to_path_landmark, landmark)
     shutil.copy(os.path.join(current_path, config.data[0].dataset.id_landmark_path), to_path_landmark)
 
