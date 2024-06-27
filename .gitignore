@@ -10,6 +10,8 @@
 *.swo
 *.mp4
 *.pth
+*.pkl
+*.mat
 tags
 
 tests/*.mp4
@@ -28,6 +30,8 @@ video/
 tests/puppet
 release/
 dataset/
+TalkingFace/deep_3drecon/BFM/
+data_npy/
 
 
 # temp file.

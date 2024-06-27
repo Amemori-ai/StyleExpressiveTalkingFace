@@ -197,6 +197,8 @@ class offsetNet(nn.Module):
         batchnorm = kwargs.get("batchnorm", True)
         is_refine = kwargs.get("is_refine", False)
 
+        
+
         if depth > 0:
             _modules = [nn.Linear(in_channels, base_channels)] + ([torch.nn.Dropout1d(0.5)] if dropout else []) + \
                        [*([BaseLinear(base_channels, base_channels, skip = skip, batchnorm = batchnorm)] +  ([torch.nn.Dropout1d(0.5)] if dropout else []))] * depth + \
@@ -217,11 +219,17 @@ class offsetNet(nn.Module):
         norm_func = eval(norm_type)
 
         if norm_type == '_minmax_constant':
+            norm_dim = kwargs.get("norm_dim",  [0, 1])
+            if norm_dim == [0, 1]:
+                dim_size = 1
+            else:
+                dim_size = in_channels // 2
+
             if '_max' in kwargs and '_min' in kwargs:
                 _min, _max = torch.tensor(kwargs['_min'], dtype = torch.float32), torch.tensor(kwargs['_max'], dtype = torch.float32)
             else:
-                _min = torch.zeros((1,1,2))
-                _max = torch.zeros((1,1,2))
+                _min = torch.zeros((1,dim_size,2))
+                _max = torch.zeros((1,dim_size,2))
             self.register_buffer('_min', _min)
             self.register_buffer('_max', _max)
 
@@ -261,7 +269,8 @@ class Dataset:
                  ldm_path: str, # final file is a numpy-format file.
                  id_path: str,
                  id_landmark_path :str, 
-                 augmentation: bool = False
+                 augmentation: bool = False,
+                 norm_dim: list = [0, 1]
                 ):
 
         assert os.path.exists(attributes_path), f"attribute path {attributes_path} not exist."
@@ -288,7 +297,7 @@ class Dataset:
         #assert len(attributes) == len(landmarks), "attributes length unequal with landmarks."
         id_landmark = np.load(id_landmark_path)
         self.offsets = (landmarks - id_landmark)[:, 48:68, :]
-        self.offset_range = self.get_offset_range(self.offsets)
+        self.offset_range = self.get_offset_range(self.offsets, norm_dim)
 
         #self.offsets = norm(self.offsets)
         self.length = len(self.attributes) #round(len(self.attributes) * ratio)
@@ -325,8 +334,8 @@ class Dataset:
                 clip_values[:, 1] = np.maximum(clip_values[:, 1], attr)
         return torch.tensor(clip_values)
 
-    def get_offset_range(self, x):
-        return np.min(x, axis = (0, 1), keepdims = True), np.max(x, axis = (0, 1), keepdims = True)
+    def get_offset_range(self, x, norm_dim):
+        return np.min(x, axis = tuple(norm_dim), keepdims = True), np.max(x, axis = tuple(norm_dim), keepdims = True)
 
     def __getitem__(
                     self,
@@ -456,7 +465,8 @@ def aligner(
                           os.path.join(current_pwd,dataset_config.ldm_path),\
                           os.path.join(current_pwd, dataset_config.id_path), \
                           os.path.join(current_pwd, dataset_config.id_landmark_path), \
-                          augmentation = False if not hasattr(dataset_config,"augmentation") else dataset_config.augmentation \
+                          augmentation = False if not hasattr(dataset_config,"augmentation") else dataset_config.augmentation, \
+                          norm_dim = [0, 1] if not hasattr(config.net, "norm_dim") else config.net.norm_dim
                           )
         datasets_list.append(dataset)
         max_values = dataset.get_attr_max()
@@ -482,7 +492,8 @@ def aligner(
                     is_refine = is_refine, \
                     norm_type = 'linear' if not hasattr(net_config, "norm_type") else net_config.norm_type, \
                     _min = offset_range[0], \
-                    _max = offset_range[1]
+                    _max = offset_range[1],
+                    norm_dim = [0, 1] if not hasattr(net_config, "norm_dim") else net_config.norm_dim
                    ) 
 
     best_nme = 100.0
@@ -629,6 +640,7 @@ def sync_lip_validate(
                     batchnorm = True if not hasattr(net_config, "batchnorm") else net_config.batchnorm, \
                     skip = False if not hasattr(net_config, "skip") else net_config.skip, \
                     norm_type = 'linear' if not hasattr(net_config, "norm_type") else net_config.norm_type, \
+                    norm_dim = [0, 1] if not hasattr(net_config, "norm_dim") else net_config.norm_dim
                    )
     logger.info(net)
     net.to(device)
@@ -723,7 +735,7 @@ def sync_lip_validate(
                 #mask = gen_masks(face_info_from_driving_image.landmarks, image)["chin"]
 
                 blender = kwargs.get("blender", None)
-                #output = merge_from_two_image(image, output, mask = mask, blender = blender)
+                output = merge_from_two_image(image, output, mask = mask, blender = blender)
                 #output = merge_from_two_image(image, output)
                 output = np.concatenate((output, image), axis = 0)
             writer.append_data(np.uint8(output))
