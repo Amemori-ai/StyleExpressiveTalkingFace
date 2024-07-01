@@ -17,6 +17,12 @@ output_copy_region = eval(config["output_copy_region"])
 
 from .ExpressiveVideoStyleGanEncoding.ExpressiveEncoding.utils import make_dataset
 
+def get_center_from_mask(mask: np.ndarray):
+    """
+    """
+    m = cv2.moments(mask) 
+    return int(m["m10"]/m["m00"]), int(m["m01"]/m["m00"])
+
 def get_soft_mask_by_region():
     soft_mask  = np.zeros((512,512,3), np.float32)
     for region in regions:
@@ -44,11 +50,12 @@ def merge_from_two_image(
         element = cv2.getStructuringElement(cv2.MORPH_RECT, (2 * erosion_size + 1, 2 * erosion_size + 1), (erosion_size, erosion_size))
         mask_erosion = cv2.erode(mask, element)
 
-        dilate_size = 5
-        element = cv2.getStructuringElement(cv2.MORPH_RECT, (2 * dilate_size + 1, 2 * dilate_size + 1), (dilate_size, dilate_size))
-        mask_dilate = cv2.dilate(mask, element)
-        mask_diff = (mask_dilate - mask_erosion)[..., np.newaxis]
-        #mask_diff = mask - mask_erosion[..., np.newaxis]
+        #mask_diff = (mask_dilate - mask_erosion)[..., np.newaxis]
+        mask_diff = mask - mask_erosion[..., np.newaxis]
+
+        #dilate_size = 3
+        #element = cv2.getStructuringElement(cv2.MORPH_RECT, (2 * dilate_size + 1, 2 * dilate_size + 1), (dilate_size, dilate_size))
+        #mask_dilate = cv2.dilate(mask, element)
 
         if blender is not None:
             output = blender(master, slave, np.uint8(mask_diff * 255))
@@ -57,7 +64,20 @@ def merge_from_two_image(
                 mask_diff = mask_diff[..., np.newaxis]
             slave = output * mask_diff + (1 - mask_diff) * slave
         else:
-            pass
+            strength = -3
+            h, w, c = mask.shape
+
+            x,y = get_center_from_mask(mask_diff[...,0])
+            x_linspace = np.linspace(0, w - 1, w)
+            y_linspace = np.linspace(0, h - 1, h)
+            x_grid, y_grid = np.meshgrid(x_linspace, y_linspace)
+
+            offset_strength = (mask[...,0] * strength).astype(np.float32)
+            offset_x = np.sign(x - x_grid) * offset_strength
+            offset_y = np.sign(y - y_grid) * offset_strength
+            master = cv2.remap(master, (x_grid + offset_x).astype(np.float32), (y_grid + offset_y).astype(np.float32), cv2.INTER_LINEAR)
+            #offset_strength = cv2.boxFilter(offset_strength, -1, ksize = (21, 21)) 
+
             #mask_diff = cv2.boxFilter(mask_diff.astype(np.float32), -1, ksize = (21, 21))
             #if mask_diff.ndim < 3:
             #    mask_diff = mask_diff[..., np.newaxis]
@@ -65,7 +85,7 @@ def merge_from_two_image(
             #mask = cv2.GaussianBlur(mask, (101, 101), 11)
             #if mask.ndim < 3:
             #    mask = mask[..., np.newaxis]
-        mask = cv2.boxFilter(mask_erosion.astype(np.float32), -1, ksize = (21, 21))
+        mask = cv2.boxFilter(mask.astype(np.float32), -1, ksize = (21, 21))
         if mask.ndim < 3:
             mask = mask[..., np.newaxis]
         merge_mask = mask

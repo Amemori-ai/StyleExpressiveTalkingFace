@@ -31,7 +31,7 @@ attr_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/
 #pose_latent_path: "/data1/chenlong/0517/public_model_exp/man3_s0_20240118/results/pose"
 #pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/man3/pose_stabled"
 e4e_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/id.pt"
-#pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pose_finetuning_028/pose"
+#pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pose_finetuning_030/pose"
 pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pose_finetuning_020_stable/pose_stabled"
 #pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/man3/pose"
 
