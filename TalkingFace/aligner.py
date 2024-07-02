@@ -677,11 +677,8 @@ def sync_lip_validate(
         weight = state_dict['weight']
         best_nme = state_dict['best_value']
         logger.info(f"load weight and nme : {best_nme}")
-
     net.load_state_dict(weight, False)
 
-    logger.info(net._min)
-    logger.info(net._max)
     net.eval()
     resolution = kwargs.get("resolution", 1024)
     decoder = StyleSpaceDecoder(stylegan_path, to_resolution = resolution)
@@ -766,3 +763,82 @@ def sync_lip_validate(
                 #output = merge_from_two_image(image, output)
                 output = np.concatenate((output, image), axis = 0)
             writer.append_data(np.uint8(output))
+
+
+
+def evaluate(
+             config_path: str,
+             offset_weight_path: str,
+             pti_weight_path: str
+            ):
+
+    """evaluate data.
+    """
+    
+    device = "cuda:0"
+    with open(config_path) as f:
+        config = edict(yaml.load(f, Loader = yaml.CLoader))
+
+    net_config = config.net
+
+    net = offsetNet(\
+                    net_config.in_channels * 2, size_of_alpha, \
+                    net_config.depth, \
+                    base_channels = 512 if not hasattr(net_config, "base_channels") else net_config.base_channels , \
+                    dropout = False if not hasattr(net_config, "dropout") else net_config.dropout, \
+                    batchnorm = True if not hasattr(net_config, "batchnorm") else net_config.batchnorm, \
+                    skip = False if not hasattr(net_config, "skip") else net_config.skip, \
+                    norm_type = 'linear' if not hasattr(net_config, "norm_type") else net_config.norm_type, \
+                   )
+
+    net.to(device)
+    state_dict = torch.load(offset_weight_path)
+    weight = state_dict
+    if "best_value" in state_dict :
+        weight = state_dict['weight']
+        best_nme = state_dict['best_value']
+        logger.info(f"load weight and nme : {best_nme}")
+    net.load_state_dict(weight, False)
+    net.eval()
+
+    folder = os.path.dirname(pti_weight_path)
+    pti_weight = os.path.join(folder, sorted(os.listdir(pti_weight_path), key = lambda x: int(''.join(re.findall('[0-9]+', x))))[-1])
+    decoder = StyleSpaceDecoder(stylegan_path, to_resolution = resolution)
+    decoder.load_state_dict(torch.load(pti_weight), False)
+    decoder.to(device)
+
+    pose_path = config.pose_path
+    attr_path = config.attr_path
+    poses = torch.load(os.path.join(current_pwd, pose_path))
+    attributes = torch.load(os.path.join(current_pwd, attr_path)) 
+    attribute = attributes[0]
+
+    
+    dataset_config = config.val
+    val_dataset = Dataset(os.path.join(current_pwd, dataset_config.attr_path), os.path.join(current_pwd,dataset_config.ldm_path), os.path.join(current_pwd, dataset_config.id_path), os.path.join(current_pwd, dataset_config.id_landmark_path))
+    val_dataloader = DataLoader(val_dataset, batch_size = config.batchsize, shuffle = False)
+
+    psnr_value = 0.0
+    for idy, data in enumerate(val_dataloader):
+        attr, offset = data
+        attr = attr.to(device)
+        offset = offset.to(device)
+        with torch.no_grad():
+            pred_attr = net(offset)
+
+        if isinstance(pred_attr, tuple):
+            pred_attr = pred_attr[0]
+
+        n = attr.shape[0]
+        w_with_pose = poses[0].repeat(n,1,1)
+        style_space_latent = decoder.get_style_space(w_with_pose)
+        ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1][size_of_alpha:]).reshape(1, -1).to(device).repeat(n, 1), [8, len(alphas)])
+        ss_updated_pred = update_lip_region_offset(ss_updated, pred_attr, version = 'v2')
+        ss_updated_gt = update_lip_region_offset(ss_updated, attr, version = 'v2')
+        image = decoder(ss_updated_pred)
+        image_gt = decoder(ss_updated_gt)
+        psnr_value += psnr_func(image, image_gt)
+
+    psnr_value /= len(val_dataloader)
+    logger.info(psnr_value)
+
