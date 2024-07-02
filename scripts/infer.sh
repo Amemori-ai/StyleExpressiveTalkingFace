@@ -1,9 +1,11 @@
 set -e
+config=$1
 
-function main
+
+function main 
 {
     CUDA_VISIBLE_DEVICES=6 python -m TalkingFace.infer \
-                           --config_path `pwd`/scripts/config.yaml \
+                           --config_path `pwd`/scripts/$config \
                            --save_path `pwd`/results/ 
 }
 

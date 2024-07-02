@@ -66,6 +66,7 @@ class TalkingFaceModel(torch.nn.Module):
                         batchnorm = True if not hasattr(net_config, "batchnorm") else net_config.batchnorm, \
                         skip = False if not hasattr(net_config, "skip") else net_config.skip, \
                         norm_type = 'linear' if not hasattr(net_config, "norm_type") else net_config.norm_type, \
+                        norm_dim = [0, 1] if not hasattr(net_config, "norm_dim") else net_config.norm_dim
                         )
         net.load_state_dict(torch.load(net_weight_path)['weight'])
         net.eval()

@@ -17,6 +17,9 @@ def infer(
         config = edict(yaml.load(f, Loader = yaml.CLoader))
 
     landmarks_path = config.landmarks_path
+    landmarks_name = os.path.basename(landmarks_path).split('.')[0].split('_')[-1]
+
+
     net_config = config.net.config
     net_weight = config.net.weight
     video_landmark_path = config.video_landmark
@@ -38,7 +41,7 @@ def infer(
 
 
     if not save_path.endswith("mp4"):
-        save_path = os.path.join(save_path, net_exp_name + '_' + pti_exp_name + '_' + pose_exp_name +  '.mp4')
+        save_path = os.path.join(save_path, net_exp_name + '_' + pti_exp_name + '_' + pose_exp_name + '_' + landmarks_name +  '.mp4')
     driving_images_dir = None
     if hasattr(config, "driving_images_dir"):
         driving_images_dir = config.driving_images_dir

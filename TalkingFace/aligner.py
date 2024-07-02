@@ -40,14 +40,11 @@ from ExpressiveEncoding.train import StyleSpaceDecoder, stylegan_path, from_tens
 
 from .module import BaseLinear
 from .equivalent_offset import fused_offsetNet
-
 from ExpressiveEncoding.loss.FaceParsing.model import BiSeNet
-
 
 psnr_func = lambda x,y: 20 * torch.log10(1.0 / torch.sqrt(torch.mean((x - y) ** 2)))
 #norm = lambda x: x
 #norm = lambda x: np.clip(x / 100, -1, 1)
-
 #norm = lambda x: ((x) / (x.max(axis = (0,1), keepdims = True)))
 norm = lambda x: ((x - x.min(axis = (0,1), keepdims = True)) / (x.max(axis = (0,1), keepdims = True) - x.min(axis = (0,1), keepdims = True)) - 0.5) * 2
 
@@ -117,7 +114,7 @@ class face_parsing:
         img = self.to_tensor(image).unsqueeze(0).to("cuda:0")
         out = self.net(img)[0].detach().squeeze(0).cpu().numpy().argmax(0)
         mask = np.zeros_like(out).astype(np.float32)
-        for label in list(range(1,  7)) + list(range(10, 16)):
+        for label in list(range(1,  7)) + list(range(10, 14)):
             mask[out == label] = 1
         out = cv2.resize(mask, (w,h))
         return out
@@ -198,6 +195,8 @@ class offsetNet(nn.Module):
         batchnorm = kwargs.get("batchnorm", True)
         is_refine = kwargs.get("is_refine", False)
 
+        
+
         if depth > 0:
             _modules = [nn.Linear(in_channels, base_channels)] + ([torch.nn.Dropout1d(0.5)] if dropout else []) + \
                        [*([BaseLinear(base_channels, base_channels, skip = skip, batchnorm = batchnorm)] +  ([torch.nn.Dropout1d(0.5)] if dropout else []))] * depth + \
@@ -218,11 +217,17 @@ class offsetNet(nn.Module):
         norm_func = eval(norm_type)
 
         if norm_type == '_minmax_constant':
+            norm_dim = kwargs.get("norm_dim",  [0, 1])
+            if norm_dim == [0, 1]:
+                dim_size = 1
+            else:
+                dim_size = in_channels // 2
+
             if '_max' in kwargs and '_min' in kwargs:
                 _min, _max = torch.tensor(kwargs['_min'], dtype = torch.float32), torch.tensor(kwargs['_max'], dtype = torch.float32)
             else:
-                _min = torch.zeros((1,1, 2))
-                _max = torch.zeros((1,1, 2))
+                _min = torch.zeros((1,dim_size,2))
+                _max = torch.zeros((1,dim_size,2))
             self.register_buffer('_min', _min)
             self.register_buffer('_max', _max)
         print(self._min.shape, self._max.shape)
@@ -262,7 +267,8 @@ class Dataset:
                  ldm_path: str, # final file is a numpy-format file.
                  id_path: str,
                  id_landmark_path :str, 
-                 augmentation: bool = False
+                 augmentation: bool = False,
+                 norm_dim: list = [0, 1]
                 ):
 
         assert os.path.exists(attributes_path), f"attribute path {attributes_path} not exist."
@@ -289,7 +295,7 @@ class Dataset:
         #assert len(attributes) == len(landmarks), "attributes length unequal with landmarks."
         id_landmark = np.load(id_landmark_path)
         self.offsets = (landmarks - id_landmark)[:, 48:68, :]
-        self.offset_range = self.get_offset_range(self.offsets)
+        self.offset_range = self.get_offset_range(self.offsets, norm_dim)
 
         #self.offsets = norm(self.offsets)
         self.length = len(self.attributes) #round(len(self.attributes) * ratio)
@@ -326,8 +332,8 @@ class Dataset:
                 clip_values[:, 1] = np.maximum(clip_values[:, 1], attr)
         return torch.tensor(clip_values)
 
-    def get_offset_range(self, x):
-        return np.min(x, axis = (0,1), keepdims = True), np.max(x, axis = (0,1), keepdims = True)
+    def get_offset_range(self, x, norm_dim):
+        return np.min(x, axis = tuple(norm_dim), keepdims = True), np.max(x, axis = tuple(norm_dim), keepdims = True)
 
     def __getitem__(
                     self,
@@ -462,7 +468,8 @@ def aligner(
                           os.path.join(current_pwd,dataset_config.ldm_path),\
                           os.path.join(current_pwd, dataset_config.id_path), \
                           os.path.join(current_pwd, dataset_config.id_landmark_path), \
-                          augmentation = False if not hasattr(dataset_config,"augmentation") else dataset_config.augmentation \
+                          augmentation = False if not hasattr(dataset_config,"augmentation") else dataset_config.augmentation, \
+                          norm_dim = [0, 1] if not hasattr(config.net, "norm_dim") else config.net.norm_dim
                           )
         datasets_list.append(dataset)
         max_values = dataset.get_attr_max()
@@ -488,7 +495,8 @@ def aligner(
                     is_refine = is_refine, \
                     norm_type = 'linear' if not hasattr(net_config, "norm_type") else net_config.norm_type, \
                     _min = offset_range[0], \
-                    _max = offset_range[1]
+                    _max = offset_range[1],
+                    norm_dim = [0, 1] if not hasattr(net_config, "norm_dim") else net_config.norm_dim
                    ) 
 
     best_nme = 100.0
@@ -505,27 +513,14 @@ def aligner(
         net.load_state_dict(weight, False)
     net.set_attr(max_values)
     net.to(device)
-
-
     # enable calculate derivate.
     for p in net.parameters():
         p.requires_grad = True
 
     optimizer = torch.optim.Adam(net.parameters(), lr = net_config.lr)
     sche = torch.optim.lr_scheduler.StepLR(optimizer, config.optim.step, gamma = config.optim.gamma)
-    #loss = torch.nn.SmoothL1Loss()
-    #loss = torch.nn.CosineSimilarity()
-    #loss = torch.nn.MSELoss()
-    #loss_image = torch.nn.L1Loss()
-    #loss_fea = torch.nn.MSELoss()
-
-    #loss_fea = SmoothL1LossMyself()
-    #loss_fea = torch.nn.CosineSimilarity()
-
-    #loss_d = torch.nn.CrossEntropyLoss()
     loss_d = torch.nn.CosineSimilarity(dim = 0)
     loss_i = torch.nn.MSELoss()
-    #loss_i = torch.nn.L1Loss()
 
     start_epoch = 1 if not hasattr(config, "start_epoch") else config.start_epoch
     pbar = tqdm(range(start_epoch, config.epochs + start_epoch))
@@ -558,8 +553,10 @@ def aligner(
 
             attr = (attr - net.clip_values[:, 0]) / (net.clip_values[:, 1] - net.clip_values[:, 0])
             pred_attr = (pred_attr - net.clip_values[:, 0]) / (net.clip_values[:, 1] - net.clip_values[:, 0])
-            i_loss_value = loss_i(attr, pred_attr)
+
             image_loss_value = loss_i(image, image_gt)
+            d_loss_value = 1 - loss_d(pred_attr, attr).mean() 
+            i_loss_value = loss_i(attr, pred_attr)
 
             loss_value = i_loss_value * 1.0 + image_loss_value * 1.0
             loss_value.backward()
@@ -668,6 +665,7 @@ def sync_lip_validate(
                     batchnorm = True if not hasattr(net_config, "batchnorm") else net_config.batchnorm, \
                     skip = False if not hasattr(net_config, "skip") else net_config.skip, \
                     norm_type = 'linear' if not hasattr(net_config, "norm_type") else net_config.norm_type, \
+                    norm_dim = [0, 1] if not hasattr(net_config, "norm_dim") else net_config.norm_dim
                    )
     logger.info(net)
     net.to(device)
@@ -697,10 +695,9 @@ def sync_lip_validate(
 
     if isinstance(landmarks, str):
         landmarks = np.load(landmarks)[...,:2]
+
     # hard code id video landmarks.
     id_landmarks = np.load(video_landmark_path)[selected_id - 1:selected_id, :]
-    #id_landmarks = get_disentangled_landmarks(np.uint8(selected_id_image))
-    #landmark_offsets = norm((landmarks - id_landmarks)[:, 48:68, :])
     landmark_offsets = (landmarks - id_landmarks)[:, 48:68, :]
 
     driving_files = None
@@ -708,7 +705,6 @@ def sync_lip_validate(
         assert os.path.isdir(driving_images_dir), "expected directory."
         driving_files = sorted(os.listdir(driving_images_dir), key = lambda x: int(''.join(re.findall('[0-9]+', x))))
         driving_files = [os.path.join(driving_images_dir, x) for x in driving_files]
-
 
     frames = kwargs.get("frames", -1)
     n = min(landmark_offsets.shape[0], len(attributes), len(os.listdir(pose_latent_path))) if frames == -1 else frames
@@ -720,17 +716,13 @@ def sync_lip_validate(
         for i in p_bar:
             attribute = attributes[i]
             w_plus_with_pose = torch.load(os.path.join(pose_latent_path, f'{i + 1}.pt'))
-            #w_plus_with_pose = torch.load(os.path.join(pose_latent_path, f'{1}.pt'))
             style_space_latent = decoder.get_style_space(w_plus_with_pose)
             landmark_offset = torch.from_numpy(landmark_offsets[i]).unsqueeze(0).float().to(device)
-            #ss_updated = update_region_offset_v2(style_space_latent, torch.tensor(attribute[1]).reshape(1, -1).to(device), [0, len(alphas)])
 
             ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1][size_of_alpha:]).reshape(1, -1).to(device), [8, len(alphas)])
             with torch.no_grad():
                 offset = net(landmark_offset)
             ss_updated = update_lip_region_offset(ss_updated, offset, version = 'v2')
-            #ss_updated = torch.load(os.path.join(pose_latent_path, f'{i + 1}.pt'))
-            #ss_updated = [x.to(device) for x in ss_updated]
             output = np.clip(from_tensor(decoder(ss_updated) * 0.5 + 0.5) * 255.0, 0.0, 255.0)
             h,w = output.shape[:2]
 
@@ -747,24 +739,17 @@ def sync_lip_validate(
             if driving_files is not None:
                 try:
                     image = cv2.imread(driving_files[i])[...,::-1]
-                    #image = cv2.imread(driving_files[0])[...,::-1]
                 except Exception as e:
                     break
                 w = h = 512
                 image = cv2.resize(image, (w,h))
                 output = cv2.resize(output, (w,h))
                 mask = face_parse_func(image)
-                #mask = face_parsing()(output)
-                #face_info_from_driving_image = get_face_info(image, detector)   
-                #mask = gen_masks(face_info_from_driving_image.landmarks, image)["chin"]
 
                 blender = kwargs.get("blender", None)
                 output = merge_from_two_image(image, output, mask = mask, blender = blender)
-                #output = merge_from_two_image(image, output)
                 output = np.concatenate((output, image), axis = 0)
             writer.append_data(np.uint8(output))
-
-
 
 def evaluate(
              config_path: str,
@@ -789,6 +774,7 @@ def evaluate(
                     batchnorm = True if not hasattr(net_config, "batchnorm") else net_config.batchnorm, \
                     skip = False if not hasattr(net_config, "skip") else net_config.skip, \
                     norm_type = 'linear' if not hasattr(net_config, "norm_type") else net_config.norm_type, \
+                    norm_dim = [0, 1] if not hasattr(net_config, "norm_dim") else net_config.norm_dim
                    )
 
     net.to(device)
@@ -803,7 +789,7 @@ def evaluate(
 
     folder = os.path.dirname(pti_weight_path)
     pti_weight = os.path.join(folder, sorted(os.listdir(pti_weight_path), key = lambda x: int(''.join(re.findall('[0-9]+', x))))[-1])
-    decoder = StyleSpaceDecoder(stylegan_path, to_resolution = resolution)
+    decoder = StyleSpaceDecoder(stylegan_path, to_resolution = 512)
     decoder.load_state_dict(torch.load(pti_weight), False)
     decoder.to(device)
 
@@ -816,7 +802,7 @@ def evaluate(
     
     dataset_config = config.val
     val_dataset = Dataset(os.path.join(current_pwd, dataset_config.attr_path), os.path.join(current_pwd,dataset_config.ldm_path), os.path.join(current_pwd, dataset_config.id_path), os.path.join(current_pwd, dataset_config.id_landmark_path))
-    val_dataloader = DataLoader(val_dataset, batch_size = config.batchsize, shuffle = False)
+    val_dataloader = DataLoader(val_dataset, batch_size = 1, shuffle = False)
 
     psnr_value = 0.0
     for idy, data in enumerate(val_dataloader):
