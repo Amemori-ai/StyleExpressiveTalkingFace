@@ -66,7 +66,6 @@ def draw_multiple_landmarks(landmarks):
                 (0,0, 255)
              ]
 
-
     canvas = np.zeros((512, 512, 3), np.uint8)
     for idx, landmark in enumerate(landmarks):
         pts1, pts2 = [], []
@@ -77,8 +76,13 @@ def draw_multiple_landmarks(landmarks):
                 pts1.append((x, y - 30))
                 #landmarks[i][1] = y - 30
             elif i in mouth_idx:
-                pts2.append((x, y + 10))
+                pts2.append((x, y))
                 #landmarks[i][1] = y + 10
+
+                #cv2.circle(canvas, (x, y), 2, (255,255,255), -1)
+            if i in [6, 10, 60, 54]:
+                cv2.putText(canvas, f'{i}', (int(x), int(y)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+
         pts1 = np.array(pts1, np.int32)
         pts2 = np.array(pts2, np.int32)
         color = colors[idx % len(colors)]
