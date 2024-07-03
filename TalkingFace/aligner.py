@@ -56,6 +56,8 @@ _minmax = lambda x: (((x - x.amin(dim = (0,1), keepdim = True)) / (x.amax(dim = 
 _normal = lambda x: x / 512
 _minmax_inner = lambda x: (((x - x.amin(dim = (1), keepdim = True)) / (x.amax(dim = (1), keepdim = True) - x.amin(dim = (1), keepdim = True) + 1e-4)) - 0.5) * 2
 _minmax_constant = lambda x, _min, _max: (torch.clip((x - _min) / (_max - _min), 0.0, 1.0) - 0.5) * 2
+_minmax_constant_no_norm = lambda x, _min, _max: torch.clip((x - _min) / (_max - _min), -1.0, 1.0)
+_max_constant = lambda x: torch.clip(x / _max, -1.0, 1.0)
 _z_constant = lambda x, _mean, _std: (x - _mean) / _std
 
 alpha_indexes = [
@@ -173,6 +175,51 @@ class shift(augmentation):
 
         raise RuntimeError(f"dim {dim} type not exits.")
 
+class shrinkage(augmentation):
+    pass
+
+class expansion(augmentation):
+    pass
+
+class affine(augmentation):
+
+    # ops
+
+    # shift
+
+    # shear
+
+    # rotate
+
+    def __init__(
+                 self, 
+                 affine = [dict(_type = "scale", kwargs = dict(_range = [0.25, 0.5, 2, 4], isotropy = True))],
+                 prob = 0.2
+                ):
+        super().__init__(prob)
+        self.affine = affine
+
+    def __repr__(self):
+        return f'affine {self.affine}'
+    
+    def _scale(self, x, _range = [1, 1],  isotropy = True):
+        if isotropy:
+            scale = random.choice(_range)
+        else:
+            scale = np.array([random.choice(_range) for _ in range(2)]).reshape(1, 2)
+        return x * scale
+
+    def _identity(self, cords):
+        return cords
+        
+    def forward(self, cords):
+
+        #affine_matrix = np.zeors((3,3)).astype(np.float32)
+
+        for affine_config in self.affine:
+            cords = getattr(self, "_" + affine_config["_type"])(cords, **affine_config["kwargs"])
+        return cords
+
 class SmoothL1LossMyself(torch.nn.SmoothL1Loss):
     def forward(self, x, y):
         #x = torch.nn.functional.softmax(x)
@@ -205,7 +252,6 @@ class offsetNet(nn.Module):
             _modules = [nn.Linear(in_channels, out_channels)]#, nn.Linear(out_channels, out_channels)]
 
         self.net = nn.Sequential(*_modules)
-        #self.act = nn.Tanh()
 
         self.refine = None
 
@@ -216,7 +262,7 @@ class offsetNet(nn.Module):
         norm_type = '_' + kwargs.get("norm_type", 'linear')
         norm_func = eval(norm_type)
 
-        if norm_type == '_minmax_constant':
+        if norm_type == '_minmax_constant' or norm_type == "_minmax_constant_no_norm":
             norm_dim = kwargs.get("norm_dim",  [0, 1])
             if norm_dim == [0, 1]:
                 dim_size = 1
@@ -240,15 +286,18 @@ class offsetNet(nn.Module):
 
     def forward(self, x):
         
-        if self.norm_type == '_minmax_constant':
+        if self.norm_type == '_minmax_constant' or self.norm_type == "_minmax_constant_no_norm":
             x = self.norm(x, self._min, self._max)
         else:
             x = self.norm(x)
 
         n = x.shape[0]
         x = x.reshape(n, -1)
-        # y = self.act(self.net(x))
         y = self.net(x)
+        #y = self.net(x)
+        #return y * (self.clip_values[:,1] - self.clip_values[:,0]) + self.clip_values[:, 0]
+
+        # y = self.net(x)
         """
         i = self.intensity(y)
         d = self.direction(y)
@@ -268,7 +317,8 @@ class Dataset:
                  id_path: str,
                  id_landmark_path :str, 
                  augmentation: bool = False,
-                 norm_dim: list = [0, 1]
+                 norm_dim: list = [0, 1],
+                 is_abs: bool = False
                 ):
 
         assert os.path.exists(attributes_path), f"attribute path {attributes_path} not exist."
@@ -294,8 +344,8 @@ class Dataset:
         landmarks = np.load(ldm_path)
         #assert len(attributes) == len(landmarks), "attributes length unequal with landmarks."
         id_landmark = np.load(id_landmark_path)
-        self.offsets = (landmarks - id_landmark)[:, 48:68, :]
-        self.offset_range = self.get_offset_range(self.offsets, norm_dim)
+        self.offsets = np.concatenate(((landmarks - id_landmark)[:, 48:68, :], (landmarks - id_landmark)[:, 6:11, :]), axis = 1)
+        self.offset_range = self.get_offset_range(self.offsets, norm_dim, is_abs)
 
         #self.offsets = norm(self.offsets)
         self.length = len(self.attributes) #round(len(self.attributes) * ratio)
@@ -308,10 +358,12 @@ class Dataset:
         if augmentation:
 
             self.ops = [
-                            shift(pixel_range = [-20, 20], dim = 'y')
+                            shift(pixel_range = [-20, 20], dim = 'y', prob = 0.2), 
+                            #affine()
                        ]
 
             logger.info([op for op in self.ops])
+
     def __len__(self):
         return self.length
 
@@ -332,7 +384,9 @@ class Dataset:
                 clip_values[:, 1] = np.maximum(clip_values[:, 1], attr)
         return torch.tensor(clip_values)
 
-    def get_offset_range(self, x, norm_dim):
+    def get_offset_range(self, x, norm_dim, is_abs = False):
+        if is_abs:
+            x = np.abs(x)
         return np.min(x, axis = tuple(norm_dim), keepdims = True), np.max(x, axis = tuple(norm_dim), keepdims = True)
 
     def __getitem__(
@@ -348,7 +402,6 @@ class Dataset:
             attribute = torch.stack(attributes, dim = 0)
         else:
             attribute = self.attributes[index][:size_of_alpha]
-
 
         if self.augmentation:
             for op in self.ops:
@@ -469,7 +522,8 @@ def aligner(
                           os.path.join(current_pwd, dataset_config.id_path), \
                           os.path.join(current_pwd, dataset_config.id_landmark_path), \
                           augmentation = False if not hasattr(dataset_config,"augmentation") else dataset_config.augmentation, \
-                          norm_dim = [0, 1] if not hasattr(config.net, "norm_dim") else config.net.norm_dim
+                          norm_dim = [0, 1] if not hasattr(config.net, "norm_dim") else config.net.norm_dim,
+                          is_abs = (config.net.norm_type == "minmax_constant_no_norm")
                           )
         datasets_list.append(dataset)
         max_values = dataset.get_attr_max()
@@ -508,7 +562,7 @@ def aligner(
         weight = state_dict
         if "best_value" in state_dict :
             weight = state_dict['weight']
-            best_nme = state_dict['best_value']
+            #best_nme = state_dict['best_value']
             logger.info(f"load weight and nme : {best_nme}")
         net.load_state_dict(weight, False)
     net.set_attr(max_values)
@@ -520,7 +574,8 @@ def aligner(
     optimizer = torch.optim.Adam(net.parameters(), lr = net_config.lr)
     sche = torch.optim.lr_scheduler.StepLR(optimizer, config.optim.step, gamma = config.optim.gamma)
     loss_d = torch.nn.CosineSimilarity(dim = 0)
-    loss_i = torch.nn.MSELoss()
+    loss_i = SmoothL1LossMyself() #torch.nn.MSELoss()
+    loss_image = torch.nn.L1Loss()
 
     start_epoch = 1 if not hasattr(config, "start_epoch") else config.start_epoch
     pbar = tqdm(range(start_epoch, config.epochs + start_epoch))
@@ -554,8 +609,8 @@ def aligner(
             attr = (attr - net.clip_values[:, 0]) / (net.clip_values[:, 1] - net.clip_values[:, 0])
             pred_attr = (pred_attr - net.clip_values[:, 0]) / (net.clip_values[:, 1] - net.clip_values[:, 0])
 
-            image_loss_value = loss_i(image, image_gt)
-            d_loss_value = 1 - loss_d(pred_attr, attr).mean() 
+            image_loss_value = loss_image(image, image_gt)
+            #d_loss_value = 1 - loss_d(pred_attr, attr).mean() 
             i_loss_value = loss_i(attr, pred_attr)
 
             loss_value = i_loss_value * 1.0 + image_loss_value * 1.0
@@ -698,7 +753,19 @@ def sync_lip_validate(
 
     # hard code id video landmarks.
     id_landmarks = np.load(video_landmark_path)[selected_id - 1:selected_id, :]
-    landmark_offsets = (landmarks - id_landmarks)[:, 48:68, :]
+
+    # 
+
+
+
+    shift_y = [landmarks[:, 54, 1] - id_landmarks[:, 54, 1],
+               landmarks[:, 60, 1] - id_landmarks[:, 60, 1],
+               landmarks[:, 6, 1] - id_landmarks[:, 6, 1],
+               landmarks[:, 10, 1] - id_landmarks[:, 10, 1]]
+    shift_y = np.stack(shift_y, axis = 1).max(axis=1)
+    landmarks[:,:,1] = landmarks[:,:,1] - shift_y.reshape(-1, 1)
+    landmark_offsets = np.concatenate(((landmarks - id_landmarks)[:, 48:68, :], (landmarks - id_landmarks)[:, 6:11, :]), axis = 1)
+    #landmark_offsets[:,:, 1] = landmark_offsets[:, :, 1] - shift_y.reshape(-1, 1)
 
     driving_files = None
     if driving_images_dir is not None:
@@ -721,7 +788,7 @@ def sync_lip_validate(
 
             ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1][size_of_alpha:]).reshape(1, -1).to(device), [8, len(alphas)])
             with torch.no_grad():
-                offset = net(landmark_offset)
+                offset = net(landmark_offset) 
             ss_updated = update_lip_region_offset(ss_updated, offset, version = 'v2')
             output = np.clip(from_tensor(decoder(ss_updated) * 0.5 + 0.5) * 255.0, 0.0, 255.0)
             h,w = output.shape[:2]
@@ -798,14 +865,12 @@ def evaluate(
     poses = torch.load(os.path.join(current_pwd, pose_path))
     attributes = torch.load(os.path.join(current_pwd, attr_path)) 
     attribute = attributes[0]
-
-    
     dataset_config = config.val
     val_dataset = Dataset(os.path.join(current_pwd, dataset_config.attr_path), os.path.join(current_pwd,dataset_config.ldm_path), os.path.join(current_pwd, dataset_config.id_path), os.path.join(current_pwd, dataset_config.id_landmark_path))
-    val_dataloader = DataLoader(val_dataset, batch_size = 1, shuffle = False)
-
+    val_dataloader = DataLoader(val_dataset, batch_size = 8, shuffle = False)
+    pbar = tqdm.tqdm(val_dataloader)
     psnr_value = 0.0
-    for idy, data in enumerate(val_dataloader):
+    for idy, data in enumerate(pbar):
         attr, offset = data
         attr = attr.to(device)
         offset = offset.to(device)
@@ -814,16 +879,16 @@ def evaluate(
 
         if isinstance(pred_attr, tuple):
             pred_attr = pred_attr[0]
-
-        n = attr.shape[0]
-        w_with_pose = poses[0].repeat(n,1,1)
-        style_space_latent = decoder.get_style_space(w_with_pose)
-        ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1][size_of_alpha:]).reshape(1, -1).to(device).repeat(n, 1), [8, len(alphas)])
-        ss_updated_pred = update_lip_region_offset(ss_updated, pred_attr, version = 'v2')
-        ss_updated_gt = update_lip_region_offset(ss_updated, attr, version = 'v2')
-        image = decoder(ss_updated_pred)
-        image_gt = decoder(ss_updated_gt)
-        psnr_value += psnr_func(image, image_gt)
+        with torch.no_grad():
+            n = attr.shape[0]
+            w_with_pose = poses[idy].repeat(n,1,1)
+            style_space_latent = decoder.get_style_space(w_with_pose)
+            ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1][size_of_alpha:]).reshape(1, -1).to(device).repeat(n, 1), [8, len(alphas)])
+            ss_updated_pred = update_lip_region_offset(ss_updated, pred_attr, version = 'v2')
+            ss_updated_gt = update_lip_region_offset(ss_updated, attr, version = 'v2')
+            image = decoder(ss_updated_pred)
+            image_gt = decoder(ss_updated_gt)
+        psnr_value += psnr_func(image, image_gt).mean()
 
     psnr_value /= len(val_dataloader)
     logger.info(psnr_value)

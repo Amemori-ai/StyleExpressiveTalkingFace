@@ -5,15 +5,14 @@
 #landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_paT.npy"
 #landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_OPG.npy"
 #landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_xmS.npy"
-#landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_yUi.npy"
-#landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_QZg.npy"
 #landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/shutup.npy"
 #landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/transformed.npy"
 landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_rCU.npy"
+#landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/0/ldm3d.npy"
 
 net:
-    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp073/config.yaml"
-    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp073/snapshots/best.pth"
+    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp070/config.yaml"
+    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp070/snapshots/best.pth"
     #weight: "/data1/chenlong/local_code/StyleExpressiveTalkingFace-master/results/man3_s0_20240118_set/snapshots/best.pth"
 pti:
     weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pivot_027/snapshots/"
@@ -52,7 +51,7 @@ driving_images_dir: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/Talkin
 #driving_images_dir: "/data1/chenlong/0517/video/0522/2/results/man3_chenl_0521/data/smooth"
 #driving_images_dir: "/data1/Dataset/DingZhi/s3_data/amemori-digital-human-autopipe/training_data/online_model/man3_s0_20240118/dataset/train/smooth/1"
 resolution: 512
-frames: -1
+frames: 100
 
 
 #/data1/chenlong/local_code/StyleExpressiveTalkingFace-master/dataset/man3_s0_20240118_set
