@@ -133,7 +133,7 @@ def deploy(
     model.eval()
     device = 'cpu'
     model.to(device)
-    _input = torch.randn(1, 20, 2).to(device)
+    _input = torch.randn(1,config.net.in_channels, 2).to(device)
     #index = 1
     latent = torch.randn(1,18,512).to(device)
     style_space = model.decoder.get_style_space(latent)

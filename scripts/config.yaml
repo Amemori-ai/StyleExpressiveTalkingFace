@@ -11,8 +11,8 @@ landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/la
 #landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/0/ldm3d.npy"
 
 net:
-    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp094/config.yaml"
-    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp094/snapshots/best.pth"
+    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp096/config.yaml"
+    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp096/snapshots/best.pth"
     #weight: "/data1/chenlong/local_code/StyleExpressiveTalkingFace-master/results/man3_s0_20240118_set/snapshots/best.pth"
 pti:
     weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pivot_027/snapshots/"
