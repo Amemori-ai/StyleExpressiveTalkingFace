@@ -1,12 +1,13 @@
 net:
-    in_channels: 20
+    in_channels: 25
     depth: 1
-    lr: 0.0001
+    lr: 0.0002
     dropout: False
     skip: False
     batchnorm: True
     is_refine: True
     norm_type: "minmax_constant"
+    norm_dim: [0]
 
 pose_path: "%POSE_PATH%"
 attr_path: "%ATTRIBUTE_PATH%"

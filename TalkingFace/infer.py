@@ -27,7 +27,7 @@ def infer(
     pti_weight = config.pti.weight
 
     if not pti_weight.endswith('pt'):
-        folder = os.path.dirname(pti_weight)
+        folder = pti_weight
         pti_weight = os.path.join(folder, sorted(os.listdir(pti_weight), key = lambda x: int(''.join(re.findall('[0-9]+', x))))[-1])
         print(f"latest weight path is {pti_weight}")
 

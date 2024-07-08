@@ -733,15 +733,33 @@ def sync_lip_validate(
         driving_files = [os.path.join(driving_images_dir, x) for x in driving_files]
 
     frames = kwargs.get("frames", -1)
-    n = min(landmark_offsets.shape[0], len(attributes), len(os.listdir(pose_latent_path))) if frames == -1 else frames
+    n = min(landmark_offsets.shape[0], len(attributes)) if frames == -1 else frames
     t = Timer()
     p_bar = tqdm.tqdm(range(n))
     detector = get_detector()
     face_parse_func = face_parsing()
+    
+    class get_pose:
+        def __init__(
+                       self,
+                       pose_latent_path
+                    ):
+            if os.path.isdir(pose_latent_path):
+                self.pose = pose_latent_path
+            else:
+                self.pose = torch.load(pose_latent_path)
+
+        def __call__(self, i):
+            if isinstance(self.pose, str):
+                return torch.load(os.path.join(pose_latent_path, f'{i + 1}.pt'))
+            else:
+                return self.pose[i]
+
+    get_pose_func = get_pose(pose_latent_path)
     with imageio.get_writer(save_path, fps = 25) as writer:
         for i in p_bar:
             attribute = attributes[i]
-            w_plus_with_pose = torch.load(os.path.join(pose_latent_path, f'{i + 1}.pt'))
+            w_plus_with_pose = get_pose_func(i) #torch.load(os.path.join(pose_latent_path, f'{i + 1}.pt'))
             style_space_latent = decoder.get_style_space(w_plus_with_pose)
             landmark_offset = torch.from_numpy(landmark_offsets[i]).unsqueeze(0).float().to(device)
 
@@ -773,7 +791,7 @@ def sync_lip_validate(
                 mask = face_parse_func(image)
 
                 blender = kwargs.get("blender", None)
-                output = merge_from_two_image(image, output, mask = mask, blender = blender)
+                #output = merge_from_two_image(image, output, mask = mask, blender = blender)
                 output = np.concatenate((output, image), axis = 0)
             writer.append_data(np.uint8(output))
 
