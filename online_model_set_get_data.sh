@@ -40,7 +40,8 @@ python tools/get_validate_data.py --from_path ${directory}/lm3d.npy \
                                   --to_path ${directory} \
                                   --ratio 0.9
 ## get training scripts
-cp -r scripts/template /data1/chenlong/online_model_set/lm_train_data/scripts/${folder_name}
+mkdir -p /data1/chenlong/online_model_set/lm_train_data/scripts
+cp -r scripts/online_set_template /data1/chenlong/online_model_set/lm_train_data/scripts/${folder_name}
 
 pose_path=${directory}/pose.pt
 attr_path=${directory}/attribute.pt
@@ -61,5 +62,27 @@ sed --expression "s@%POSE_PATH%@${pose_path}@" \
     -e "s@%ATTR_TRAIN_PATH%@${attr_train_path}@g" \
     -e "s@%ATTR_VAL_PATH%@${attr_val_path}@g" \
     -e "s@%LANDMARK_TRAIN_PATH%@${ldm_train_path}@g" \
-    scripts/template/config.yaml \
+    scripts/online_set_template/config.yaml \
     > /data1/chenlong/online_model_set/lm_train_data/scripts/${folder_name}/config.yaml
+
+# get config_test.yaml
+
+pose_latent_path=${ROOT_PATH}/${exp_name}/pose
+train_config_path=/data1/chenlong/online_model_set/lm_train_data/scripts/${folder_name}/config.yaml
+train_weight_path=/data1/chenlong/online_model_set/lm_train_data/results/${folder_name}/snapshots/best.pth
+pti_path=/data1/chenlong/online_model_set/exp_ori/${folder_name}/results/pti_ft_512/snapshots
+video_landmark_path=${directory}/lm3d.npy
+driving_images_dir=${gt_smooth}
+
+
+sed --expression "s@%POSE_LATENT_PATH%@${pose_latent_path}@" \
+    -e "s@%TRAIN_CONFIG_PATH%@${train_config_path}@g" \
+    -e "s@%TRAIN_WEIGHT_PATH%@${train_weight_path}@g" \
+    -e "s@%PTI_WEIGHT_PATH%@${pti_path}@g" \
+    -e "s@%ATTRIBUTE_PATH%@${attr_path}@g" \
+    -e "s@%ID_PATH%@${id_path}@g" \
+    -e "s@%LANDMARK_PATH%@${video_landmark_path}@g" \
+    -e "s@%ID_LANDMARK_PATH%@${id_landmark_path}@g" \
+    -e "s@%GT_PATH%@${driving_images_dir}@g" \
+    scripts/online_set_template/config_test.yaml \
+    > /data1/chenlong/online_model_set/lm_train_data/scripts/${folder_name}/config_test.yaml

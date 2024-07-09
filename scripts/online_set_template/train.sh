@@ -5,18 +5,13 @@ echo $exp_name
 username=`whoami` 
 
 mkdir -p results
-
+exp_name=$2
 function main
 {
-    CUDA_VISIBLE_DEVICES=$1 python -m TalkingFace \
-                           --config_path `pwd`/scripts/${exp_name}/config.yaml \
-                           --save_path `pwd`/results/${exp_name}
+    CUDA_VISIBLE_DEVICES=2 python -m TalkingFace \
+                           --config_path `pwd`/scripts/lm_train_data/scripts/${exp_name}/config.yaml \
+                           --save_path /data1/chenlong/online_model_set/lm_train_data/results/${exp_name}
 }
-
-if [ ! -d "log/${exp_name}" ]; then
-    
-    mkdir -p "log/${exp_name}"
-fi
 
 _timestamp=`date +%Y%m%d%H`
 

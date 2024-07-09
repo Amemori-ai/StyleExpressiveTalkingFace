@@ -8,12 +8,14 @@ man3_s2_20240118
 man3_s1_20240118
 lady9_s4_20240118
 lady9_s1_20240118
-lady9_s2_20240118
-Yd7ehnqJ
-dP2fbJhg
-5Iob5FSx
-KLhKUOMV
-man3_s0_20240626
+##lady9_s2_20240118
+#Yd7ehnqJ
+#YRKL6NhF
+##dP2fbJhg
+#soJHXhs8
+#5Iob5FSx
+#KLhKUOMV
+#man3_s0_20240626
 )
 
 
@@ -32,5 +34,6 @@ do
 #  CUDA_VISIBLE_DEVICES=${CUDA_DEVICES} source ${train_pose_facial_dir}/scripts/train_pipeline/train.sh ${efs_model_name}
   cd ${train_offset_dir}
   CUDA_VISIBLE_DEVICES=${CUDA_DEVICES} source ${train_offset_dir}/online_model_set_get_data.sh ${efs_model_name}
-  CUDA_VISIBLE_DEVICES=${CUDA_DEVICES} source ${train_offset_dir}/scripts/lm_train_data/scripts/${efs_model_name}/train.sh ${CUDA_DEVICES} ${efs_model_name}
+#  CUDA_VISIBLE_DEVICES=${CUDA_DEVICES} source ${train_offset_dir}/scripts/lm_train_data/scripts/${efs_model_name}/train.sh ${CUDA_DEVICES} ${efs_model_name}
+#  CUDA_VISIBLE_DEVICES=${CUDA_DEVICES} source ${train_offset_dir}/scripts/infer_chenl.sh ${CUDA_DEVICES} ${efs_model_name}
 done

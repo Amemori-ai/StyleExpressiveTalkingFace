@@ -38,3 +38,6 @@ data_npy/
 results
 error.txt
 
+/scripts/lm_train_data/scripts
+/release
+/results
