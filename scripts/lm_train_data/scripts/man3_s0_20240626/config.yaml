@@ -1,0 +1,39 @@
+net:
+    in_channels: 25
+    depth: 1
+    lr: 0.0002
+    dropout: False
+    skip: False
+    batchnorm: True
+    is_refine: True
+    norm_type: "minmax_constant"
+    norm_dim: [0]
+
+
+pose_path: "/data1/chenlong/online_model_set/lm_train_data/datasets/man3_s0_20240626/pose.pt"
+attr_path: "/data1/chenlong/online_model_set/lm_train_data/datasets/man3_s0_20240626/attribute.pt"
+
+data:
+    - dataset:
+             attr_path: "/data1/chenlong/online_model_set/lm_train_data/datasets/man3_s0_20240626/train_attr.pt"
+             ldm_path: "/data1/chenlong/online_model_set/lm_train_data/datasets/man3_s0_20240626/train_landmarks.npy"
+             id_path: "/data1/chenlong/online_model_set/lm_train_data/datasets/man3_s0_20240626/id.pt"
+             id_landmark_path: "/data1/chenlong/online_model_set/lm_train_data/datasets/man3_s0_20240626/id_landmark.npy"
+             augmentation: True
+
+val:
+    attr_path: "/data1/chenlong/online_model_set/lm_train_data/datasets/man3_s0_20240626/val_attr.pt"
+    ldm_path: "/data1/chenlong/online_model_set/lm_train_data/datasets/man3_s0_20240626/val_landmarks.npy"
+    id_path: "/data1/chenlong/online_model_set/lm_train_data/datasets/man3_s0_20240626/id.pt"
+    id_landmark_path: "/data1/chenlong/online_model_set/lm_train_data/datasets/man3_s0_20240626/id_landmark.npy"
+
+optim:
+    step: 150
+    gamma: 0.5
+
+batchsize: 128
+epochs: 450
+show_internal: 100
+save_internal: 5
+
+
