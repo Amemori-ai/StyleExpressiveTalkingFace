@@ -1,0 +1,38 @@
+net:
+    in_channels: 25
+    depth: 1
+    lr: 0.0002
+    dropout: False
+    skip: False
+    batchnorm: True
+    is_refine: True
+    norm_type: "minmax_constant"
+    norm_dim: [0]
+
+pose_path: "%POSE_PATH%"
+attr_path: "%ATTRIBUTE_PATH%"
+
+data:
+    - dataset:
+             attr_path: "%ATTR_TRAIN_PATH%"
+             ldm_path: "%LANDMARK_TRAIN_PATH%"
+             id_path: "%ID_PATH%"
+             id_landmark_path: "%ID_LANDMARK_PATH%"
+             augmentation: True
+
+val:
+    attr_path: "%ATTR_VAL_PATH%"
+    ldm_path: "%LANDMARK_VAL_PATH%"
+    id_path: "%ID_PATH%"
+    id_landmark_path: "%ID_LANDMARK_PATH%"
+
+optim:
+    step: 150
+    gamma: 0.5
+
+batchsize: 128
+epochs: 450
+show_internal: 100
+save_internal: 5
+
+
