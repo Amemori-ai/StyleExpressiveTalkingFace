@@ -28,12 +28,12 @@ python merge_more2one.py ${ROOT_PATH}/expressive ${directory}/attribute.pt
 # attribute
 python tools/get_validate_data.py --from_path ${directory}/attribute.pt \
                                   --from_path ${diretory} \
-                                  --ratio 0.1
+                                  --ratio 0.9
 
 # landmark
 python tools/get_validate_data.py --from_path ${directory}/lm3d.npy \
                                   --from_path ${diretory} \
-                                  --ratio 0.1
+                                  --ratio 0.9
 # get training scripts
 cp -r scripts/template scripts/${exp_name}
 

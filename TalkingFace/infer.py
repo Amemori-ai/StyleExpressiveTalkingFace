@@ -19,7 +19,6 @@ def infer(
     landmarks_path = config.landmarks_path
     landmarks_name = os.path.basename(landmarks_path).split('.')[0].split('_')[-1]
 
-
     net_config = config.net.config
     net_weight = config.net.weight
     video_landmark_path = config.video_landmark
@@ -33,12 +32,11 @@ def infer(
 
     attribute_weight = config.attr_path
     pose_latent_path = config.pose_latent_path
-    e4e_path = config.e4e_path
+    id_landmark = config.id_landmark
 
     net_exp_name = config.net.config.split('/')[-2]
     pti_exp_name = list(filter(lambda x: 'exp' in x or 'pivot' in x or 'pti' in x, pti_weight.split('/')))[0]
     pose_exp_name = pose_latent_path.split('/')[-2]
-
 
     if not save_path.endswith("mp4"):
         save_path = os.path.join(save_path, net_exp_name + '_' + pti_exp_name + '_' + pose_exp_name + '_' + landmarks_name +  '.mp4')
@@ -53,7 +51,7 @@ def infer(
                       pti_weight,
                       pose_latent_path,
                       attribute_weight,
-                      e4e_path,
+                      id_landmark,
                       save_path,
                       video_landmark_path,
                       driving_images_dir,

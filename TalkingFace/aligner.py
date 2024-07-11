@@ -653,7 +653,7 @@ def sync_lip_validate(
                       pti_weight_path: str,
                       pose_latent_path: str,
                       attributes_path: str,
-                      e4e_latent_path: str,
+                      id_landmark_path: str,
                       save_path: str,
                       video_landmark_path: str,
                       driving_images_dir: str = None,
@@ -678,7 +678,6 @@ def sync_lip_validate(
                     norm_type = 'linear' if not hasattr(net_config, "norm_type") else net_config.norm_type, \
                     norm_dim = [0, 1] if not hasattr(net_config, "norm_dim") else net_config.norm_dim
                    )
-    logger.info(net)
     net.to(device)
     state_dict = torch.load(offset_weight_path)
     weight = state_dict
@@ -689,40 +688,39 @@ def sync_lip_validate(
 
     net.load_state_dict(weight, False)
 
-    logger.info(net._min)
-    logger.info(net._max)
     net.eval()
     resolution = kwargs.get("resolution", 1024)
     decoder = StyleSpaceDecoder(stylegan_path, to_resolution = resolution)
     decoder.load_state_dict(torch.load(pti_weight_path), False)
     decoder.to(device)
     attributes = torch.load(attributes_path)
-    get_disentangled_landmarks = DisentangledLandmarks()
-    id_path = e4e_latent_path.replace("pt", "txt")
-    if os.path.exists(id_path):
-        with open(id_path, 'r') as f:
-            selected_id = int(f.readlines()[0].strip())
-    else:
-        _, selected_id_image, selected_id_latent, selected_id = torch.load(e4e_latent_path)
-        with open(id_path, 'w') as f:
-            f.write(str(selected_id))
+    #get_disentangled_landmarks = DisentangledLandmarks()
+    #id_path = e4e_latent_path.replace("pt", "txt")
+    #if os.path.exists(id_path):
+    #    with open(id_path, 'r') as f:
+    #        selected_id = int(f.readlines()[0].strip())
+    #else:
+    #    _, selected_id_image, selected_id_latent, selected_id = torch.load(e4e_latent_path)
+    #    with open(id_path, 'w') as f:
+    #        f.write(str(selected_id))
 
     if isinstance(landmarks, str):
         landmarks = np.load(landmarks)[...,:2]
 
     # hard code id video landmarks.
-    id_landmarks = np.load(video_landmark_path)[selected_id - 1:selected_id, :]
+    #id_landmarks = np.load(video_landmark_path)[selected_id:selected_id + 1, :]
+    id_landmarks = np.load(id_landmark_path)
 
     # 
 
 
 
-    #shift_y = [landmarks[:, 54, 1] - id_landmarks[:, 54, 1],
-    #           landmarks[:, 60, 1] - id_landmarks[:, 60, 1],
-    #           landmarks[:, 6, 1] - id_landmarks[:, 6, 1],
-    #           landmarks[:, 10, 1] - id_landmarks[:, 10, 1]]
-    #shift_y = np.stack(shift_y, axis = 1).max(axis=1)
-    #landmarks[:,:,1] = landmarks[:,:,1] - shift_y.reshape(-1, 1)
+    shift_y = [landmarks[:, 54, 1] - id_landmarks[:, 54, 1],
+               landmarks[:, 60, 1] - id_landmarks[:, 60, 1],
+               landmarks[:, 6, 1] - id_landmarks[:, 6, 1],
+               landmarks[:, 10, 1] - id_landmarks[:, 10, 1]]
+    shift_y = np.stack(shift_y, axis = 1).max(axis=1)
+    landmarks[:,:,1] = landmarks[:,:,1] - shift_y.reshape(-1, 1)
     landmark_offsets = np.concatenate(((landmarks - id_landmarks)[:, 48:68, :], (landmarks - id_landmarks)[:, 6:11, :]), axis = 1)
     #landmark_offsets[:,:, 1] = landmark_offsets[:, :, 1] - shift_y.reshape(-1, 1)
 
@@ -763,6 +761,7 @@ def sync_lip_validate(
             style_space_latent = decoder.get_style_space(w_plus_with_pose)
             landmark_offset = torch.from_numpy(landmark_offsets[i]).unsqueeze(0).float().to(device)
 
+            #ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1]).reshape(1, -1).to(device), [0, len(alphas)])
             ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1][size_of_alpha:]).reshape(1, -1).to(device), [8, len(alphas)])
             with torch.no_grad():
                 offset = net(landmark_offset) 
@@ -788,10 +787,9 @@ def sync_lip_validate(
                 w = h = 512
                 image = cv2.resize(image, (w,h))
                 output = cv2.resize(output, (w,h))
-                mask = face_parse_func(image)
-
+                #mask = face_parse_func(image)
                 blender = kwargs.get("blender", None)
-                #output = merge_from_two_image(image, output, mask = mask, blender = blender)
+                output = merge_from_two_image(image, output, mask = mask, blender = blender)
                 output = np.concatenate((output, image), axis = 0)
             writer.append_data(np.uint8(output))
 

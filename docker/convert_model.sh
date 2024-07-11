@@ -1,5 +1,6 @@
 expname=$1
 decoder_path=$2
+image_path=$3
 docker run  \
        -v `pwd`:/app/ \
        -v /data1:/data1 \
@@ -12,7 +13,7 @@ docker run  \
        --decoder_path \
        $decoder_path \
       --to_path /app/release \
-      --pwd /data1/wanghaoran/Amemori/ExpressiveVideoStyleGanEncoding
+      --image_path  $image_path
 
 
 aws s3 sync release/$expname  s3://update-weights/model/Voice2Lip_v1.3.1/$expname

@@ -1,14 +1,16 @@
-landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_rCU.npy"
+landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_sVw.npy"
 
 net:
-    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/lady9_s4_20240118/config.yaml"
-    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/lady9_s4_20240118/snapshots/best.pth"
+    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp099/config.yaml"
+    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp099/snapshots/best.pth"
 pti:
-    weight: "/data1/chenlong/online_model_set/exp_ori/lady9_s4_20240118/results/pti_ft_512/snapshots"
+    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pivot_050/snapshots/"
+    #weight: "/data1/chenlong/online_model_set/exp_ori/lady9_s4_20240118/results/pti_ft_512/snapshots"
 
 attr_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/lady9_s4_20240118/attribute.pt"
 e4e_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/lady9_s4_20240118/id.pt"
 pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/lady9_s4_20240118/pose.pt"
+id_landmark: "/data1/chenlong/online_model_set/lm_train_data/datasets/lady9_s4_20240118/id_landmark.npy"
 
 
 video_landmark: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/lady9_s4_20240118/lm3d_e4e.npy"
