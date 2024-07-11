@@ -1,0 +1,22 @@
+landmarks_path: "/data1/chenlong/local_code/StyleExpressiveTalkingFace-master/tx_lm2d.npy"
+
+net:
+    config: "%TRAIN_CONFIG_PATH%"
+    weight: "%TRAIN_WEIGHT_PATH%"
+
+pti:
+    weight: "%PTI_WEIGHT_PATH%"
+
+attr_path: "%ATTRIBUTE_PATH%"
+
+e4e_path: "%ID_PATH%"
+
+pose_latent_path: "%POSE_LATENT_PATH%"
+
+video_landmark: "%LANDMARK_PATH%"
+id_landmark: "%ID_LANDMARK_PATH%"
+
+driving_images_dir: "%GT_PATH%"
+
+resolution: 512
+frames: 200

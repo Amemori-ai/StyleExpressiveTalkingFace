@@ -708,13 +708,7 @@ def sync_lip_validate(
         landmarks = np.load(landmarks)[...,:2]
 
     # hard code id video landmarks.
-    #id_landmarks = np.load(video_landmark_path)[selected_id:selected_id + 1, :]
-    id_landmarks = np.load(id_landmark_path)
-
-    # 
-
-
-
+    id_landmarks = np.load(config.val.id_landmark_path)
     shift_y = [landmarks[:, 54, 1] - id_landmarks[:, 54, 1],
                landmarks[:, 60, 1] - id_landmarks[:, 60, 1],
                landmarks[:, 6, 1] - id_landmarks[:, 6, 1],
