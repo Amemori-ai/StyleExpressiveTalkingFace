@@ -1,0 +1,13 @@
+{
+  version: "realtime",
+  sigma: 0,
+  lrs3_stats: "stats.npy",
+  mask_region: "274,494,80,432",
+  align_center : 1 ,
+  e4e_type : "e4e",
+  output_copy_region : "[[274,494,80,432]]",
+  soft_mask_region : "[[340,494,130,-130],[274,340,130,-130]]",
+  audio2motion_version : "20231222",
+  hubert_version : "chinese",
+  addJaw: True
+}

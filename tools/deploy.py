@@ -58,6 +58,7 @@ class TalkingFaceModel(torch.nn.Module):
                 ):
         super().__init__()
 
+        renorm = "clip" if not hasattr(net_config, "renorm") else net_config.renorm
         net = offsetNet(net_config.in_channels * 2, 
                         size_of_alpha, 
                         net_config.depth,
@@ -66,8 +67,10 @@ class TalkingFaceModel(torch.nn.Module):
                         batchnorm = True if not hasattr(net_config, "batchnorm") else net_config.batchnorm, \
                         skip = False if not hasattr(net_config, "skip") else net_config.skip, \
                         norm_type = 'linear' if not hasattr(net_config, "norm_type") else net_config.norm_type, \
-                        norm_dim = [0, 1] if not hasattr(net_config, "norm_dim") else net_config.norm_dim
+                        norm_dim = [0, 1] if not hasattr(net_config, "norm_dim") else net_config.norm_dim,
+                        renorm = renorm
                         )
+        logger.info(net)
         net.load_state_dict(torch.load(net_weight_path)['weight'])
         net.eval()
         #net = fused_offsetNet(copy.deepcopy(net))
@@ -95,11 +98,11 @@ def get_blend_mask(
     image = cv2.resize(image, (512, 512))
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     mask = face_parse(image)
-    erosion_size = 20
-    element = cv2.getStructuringElement(cv2.MORPH_RECT, (2 * erosion_size + 1, 2 * erosion_size + 1), (erosion_size, erosion_size))
-    mask_erosion = cv2.erode(mask, element)
+    #erosion_size = 20
+    #element = cv2.getStructuringElement(cv2.MORPH_RECT, (2 * erosion_size + 1, 2 * erosion_size + 1), (erosion_size, erosion_size))
+    #mask_erosion = cv2.erode(mask, element)
 
-    mask = cv2.boxFilter(mask_erosion.astype(np.float32), -1, ksize = (21, 21))
+    mask = cv2.boxFilter(mask.astype(np.float32), -1, ksize = (21, 21))
     if mask.ndim < 3:
         mask = mask[..., np.newaxis]
     return mask * 255.0
@@ -108,8 +111,8 @@ def deploy(
             exp_name: str,
             decoder_path: str,
             to_path: str,
-            pwd: str
-          ):
+            image_path: str
+         ):
     
     #assert os.path.isdir(to_path), "to_path expected is directory."
     
@@ -122,6 +125,8 @@ def deploy(
     to_path_masks = os.path.join(to_path, "templates", "blend_masks.mp4")
     os.makedirs(os.path.dirname(to_path_masks), exist_ok = True)
 
+    shutil.copy(os.path.join(current_path, "./template.yaml"), os.path.join(to_path, "config.yaml"))
+
     net_config_path = os.path.join(current_path, 'scripts', exp_name, 'config.yaml')
     net_snapshots_path = os.path.join(current_path, 'results', exp_name, 'snapshots', 'best.pth')
 
@@ -133,7 +138,7 @@ def deploy(
     model.eval()
     device = 'cpu'
     model.to(device)
-    _input = torch.randn(1, 20, 2).to(device)
+    _input = torch.randn(1,config.net.in_channels, 2).to(device)
     #index = 1
     latent = torch.randn(1,18,512).to(device)
     style_space = model.decoder.get_style_space(latent)
@@ -152,8 +157,6 @@ def deploy(
     output_onnx = onnx_infer(onnx_model_path, _input, style_space)
     diff = np.abs(output_original.detach().cpu().numpy() - output_onnx)
     logger.info(f"max error {diff.max()}, min error {diff.min()}, avg error {diff.mean()}")
-    gen_file_list, _, _, selected_id = torch.load(os.path.join(current_path, config.data[0].dataset.id_path))
-    landmarks = np.load(os.path.join(current_path, config.data[0].dataset.ldm_path))
     #offsets = norm((landmarks - landmarks[selected_id - 1: selected_id, ...])[:, 48:68, ...])
     #np.save(to_path_landmark, landmark)
     shutil.copy(os.path.join(current_path, config.data[0].dataset.id_landmark_path), to_path_landmark)
@@ -167,11 +170,21 @@ def deploy(
     writer = imageio.get_writer(to_path_masks, fps = 25)
 
     model.to("cuda:0")
-    for i in p_bar:
+    postfixs = ["png", "jpg"]
 
-        image_path = os.path.join(pwd, gen_file_list[i])
-        mask = get_blend_mask(cv2.imread(image_path), face_parse)
-        writer.append_data(mask)
+    # check exists.
+    postfix = ""
+    for _p in postfixs:
+        _path = os.path.join(image_path, f'{0}.') + _p
+        if os.path.exists(_path):
+            postfix = _p
+            break
+
+    for i in p_bar:
+        
+        _path = os.path.join(image_path, f'{i}.') + postfix
+        mask = get_blend_mask(cv2.imread(_path), face_parse)
+        writer.append_data(np.uint8(mask))
         attribute = attributes[i]
         w_plus_with_pose = pose_latents[i]
         style_space_latent = model.decoder.get_style_space(w_plus_with_pose)
@@ -204,14 +217,14 @@ def deploy(
 @click.option('--exp_name')
 @click.option('--decoder_path')
 @click.option('--to_path')
-@click.option('--pwd', default = None)
+@click.option('--image_path')
 def _invoker_deploy(
                     exp_name,
                     decoder_path,
                     to_path,
-                    pwd
+                    image_path
                    ):
-    return deploy(exp_name, decoder_path, to_path, pwd)
+    return deploy(exp_name, decoder_path, to_path, image_path)
 
 if __name__ == '__main__':
     _invoker_deploy()

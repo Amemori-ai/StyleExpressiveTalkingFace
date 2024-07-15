@@ -43,15 +43,15 @@ def merge_from_two_image(
     if mask is not None:
         if mask.ndim < 3:
             mask = mask[..., np.newaxis]
-        mask = np.uint8(mask)
 
         # dilate
         erosion_size = 15
         element = cv2.getStructuringElement(cv2.MORPH_RECT, (2 * erosion_size + 1, 2 * erosion_size + 1), (erosion_size, erosion_size))
-        mask_erosion = cv2.erode(mask, element)
+        mask_erosion = cv2.erode(np.uint8(mask), element)
 
         #mask_diff = (mask_dilate - mask_erosion)[..., np.newaxis]
-        mask_diff = mask - mask_erosion[..., np.newaxis]
+        
+        #mask_diff = mask - mask_erosion[..., np.newaxis]
 
         #dilate_size = 3
         #element = cv2.getStructuringElement(cv2.MORPH_RECT, (2 * dilate_size + 1, 2 * dilate_size + 1), (dilate_size, dilate_size))
@@ -64,7 +64,15 @@ def merge_from_two_image(
             #    mask_diff = mask_diff[..., np.newaxis]
             #slave = output * mask_diff + (1 - mask_diff) * slave
         else:
-            strength = -3
+            mask_blur = mask.astype(np.float32)
+            #mask_blur = cv2.boxFilter(mask.astype(np.float32), -1, ksize = (21, 21))
+            dilate_size = 15
+            element = cv2.getStructuringElement(cv2.MORPH_RECT, (2 * dilate_size + 1, 2 * dilate_size + 1), (dilate_size, dilate_size))
+            mask_dilate = cv2.dilate(mask_blur, element)
+            if mask_dilate.ndim < 3:
+                mask_dilate = mask_dilate[..., np.newaxis]
+            mask_diff = mask_dilate - mask_blur
+            strength = -5
             h, w, c = mask.shape
 
             x,y = get_center_from_mask(mask_diff[...,0])
@@ -75,6 +83,8 @@ def merge_from_two_image(
             offset_strength = (mask[...,0] * strength).astype(np.float32)
             offset_x = np.sign(x - x_grid) * offset_strength
             offset_y = np.sign(y - y_grid) * offset_strength
+            offset_x = cv2.boxFilter(offset_x, -1, ksize = (21, 21)) 
+            offset_y = cv2.boxFilter(offset_y, -1, ksize = (21, 21)) 
             master = cv2.remap(master, (x_grid + offset_x).astype(np.float32), (y_grid + offset_y).astype(np.float32), cv2.INTER_LINEAR)
             #offset_strength = cv2.boxFilter(offset_strength, -1, ksize = (21, 21)) 
 

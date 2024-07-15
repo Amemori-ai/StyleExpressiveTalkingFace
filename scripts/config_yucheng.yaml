@@ -1,0 +1,22 @@
+landmarks_path: "/data1/chenlong/local_code/StyleExpressiveTalkingFace-master/tx_lm2d.npy"
+#landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/Yd7ehnqJ/train_landmarks.npy"
+net:
+    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp097/config.yaml"
+    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp097/snapshots/best.pth"
+
+pti:
+    weight: "/data1/chenlong/online_model_set/exp_ori/Yd7ehnqJ/results/pti_ft_512/snapshots/"
+
+attr_path: "/data1/chenlong/online_model_set/lm_train_data_20240709/datasets/Yd7ehnqJ/attribute.pt"
+
+e4e_path: "/data1/chenlong/online_model_set/lm_train_data_20240709/datasets/Yd7ehnqJ/id.pt"
+
+pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/Yd7ehnqJ/pose_finetuning.pt"
+
+video_landmark: "/data1/chenlong/online_model_set/lm_train_data_20240709/datasets/Yd7ehnqJ/lm3d_e4e.npy"
+id_landmark: "/data1/chenlong/online_model_set/lm_train_data_20240709/datasets/Yd7ehnqJ/id_landmark.npy"
+
+driving_images_dir: "/data1/chenlong/online_model_set/face/Yd7ehnqJ/face"
+
+resolution: 512
+frames: 100

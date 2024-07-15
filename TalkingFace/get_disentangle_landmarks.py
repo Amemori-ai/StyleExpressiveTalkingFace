@@ -70,7 +70,7 @@ def draw_multiple_landmarks(landmarks):
     for idx, landmark in enumerate(landmarks):
         pts1, pts2 = [], []
         for i in range(68):
-            x, y = landmark[i]
+            x, y = landmark[i, :2]
 
             if i in eye_idx:
                 pts1.append((x, y - 30))

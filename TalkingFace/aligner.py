@@ -29,14 +29,13 @@ from TalkingFace.util import merge_from_two_image
 current_pwd = os.getcwd()
 logger.info(current_pwd)
 
-from .get_disentangle_landmarks import DisentangledLandmarks, landmarks_visualization, draw_landmarks
+from .get_disentangle_landmarks import DisentangledLandmarks, landmarks_visualization, draw_landmarks, draw_multiple_landmarks
 where_am_i = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, os.path.join(where_am_i, "ExpressiveVideoStyleGanEncoding"))
 
 from ExpressiveEncoding.train import StyleSpaceDecoder, stylegan_path, from_tensor,\
                                      PoseEdit, get_detector, get_face_info, \
-                                     gen_masks, to_tensor, imageio, \
-                                     get_face_info
+                                     gen_masks, to_tensor, imageio
 
 from .module import BaseLinear
 from .equivalent_offset import fused_offsetNet
@@ -55,8 +54,14 @@ _linear = lambda x: x
 _minmax = lambda x: (((x - x.amin(dim = (0,1), keepdim = True)) / (x.amax(dim = (0,1), keepdim = True) - x.amin(dim = (0,1), keepdim = True))) - 0.5) * 2
 _normal = lambda x: x / 512
 _minmax_inner = lambda x: (((x - x.amin(dim = (1), keepdim = True)) / (x.amax(dim = (1), keepdim = True) - x.amin(dim = (1), keepdim = True) + 1e-4)) - 0.5) * 2
+
+exp_supress = lambda x: (1 / (1 + torch.exp(-4 * (x - 0.5))))
+linear_supress = lambda x: x
+
+_minmax_constant_no_clip = lambda x, _min, _max, supress: (supress((x - _min) / (_max - _min)) - 0.5) * 2
 _minmax_constant = lambda x, _min, _max: (torch.clip((x - _min) / (_max - _min), 0.0, 1.0) - 0.5) * 2
-_minmax_constant_no_norm = lambda x, _min, _max: torch.clip((x - _min) / (_max - _min), -1.0, 1.0)
+#_minmax_constant = lambda x, _min, _max: (((x - _min) / (_max - _min)) - 0.5) * 2
+_minmax_constant_no_norm = lambda x, _min, _max: torch.clip((x - _min) / (_max - _min), 0.0, 1.0)
 _max_constant = lambda x: torch.clip(x / _max, -1.0, 1.0)
 _z_constant = lambda x, _mean, _std: (x - _mean) / _std
 
@@ -242,6 +247,7 @@ class offsetNet(nn.Module):
         batchnorm = kwargs.get("batchnorm", True)
         is_refine = kwargs.get("is_refine", False)
 
+        renorm = kwargs.get("renorm", "clip")
         
 
         if depth > 0:
@@ -262,7 +268,7 @@ class offsetNet(nn.Module):
         norm_type = '_' + kwargs.get("norm_type", 'linear')
         norm_func = eval(norm_type)
 
-        if norm_type == '_minmax_constant' or norm_type == "_minmax_constant_no_norm":
+        if norm_type == '_minmax_constant' or norm_type == "_minmax_constant_no_norm" or norm_type == "_minmax_constant_no_clip":
             norm_dim = kwargs.get("norm_dim",  [0, 1])
             if norm_dim == [0, 1]:
                 dim_size = 1
@@ -276,38 +282,44 @@ class offsetNet(nn.Module):
                 _max = torch.zeros((1,dim_size,2))
             self.register_buffer('_min', _min)
             self.register_buffer('_max', _max)
-        print(self._min.shape, self._max.shape)
         self.norm_type = norm_type
         self.norm = norm_func
-        self.register_buffer("clip_values", torch.ones((out_channels, 2), dtype = torch.float32))
 
-    def set_attr(self, clip_values: torch.Tensor):
+        self.register_buffer("clip_values", torch.ones((out_channels, 2), dtype = torch.float32))
+        if renorm == "clip":
+            def clip(x):
+                self.clip_values.to(x)
+                return torch.clip(x, self.clip_values[:,0], self.clip_values[:,1])
+            self.renorm = clip
+        elif renorm == "znorm":
+            self.register_buffer("z_values", torch.ones((2, out_channels), dtype = torch.float32))
+            def renorm(x):
+                self.z_values.to(x)
+                return x * self.z_values[1, :] + self.z_values[0, :]
+            self.renorm = renorm
+        else:
+            raise RuntimeError("unexpected renorm function.")
+
+    def set_clip(self, clip_values: torch.Tensor):
         self.clip_values = clip_values
+
+    def set_z_attr(self, values: torch.Tensor):
+        self.z_values = values
 
     def forward(self, x):
         
-        if self.norm_type == '_minmax_constant' or self.norm_type == "_minmax_constant_no_norm":
-            x = self.norm(x, self._min, self._max)
+        if self.norm_type == '_minmax_constant' or self.norm_type == "_minmax_constant_no_norm" or self.norm_type == "_minmax_constant_no_clip":
+            if self.norm_type == "_minmax_constant_no_clip":
+                x = self.norm(x, self._min, self._max, exp_supress)
+            else:
+                x = self.norm(x, self._min, self._max)
         else:
             x = self.norm(x)
 
         n = x.shape[0]
         x = x.reshape(n, -1)
         y = self.net(x)
-        #y = self.net(x)
-        #return y * (self.clip_values[:,1] - self.clip_values[:,0]) + self.clip_values[:, 0]
-
-        # y = self.net(x)
-        """
-        i = self.intensity(y)
-        d = self.direction(y)
-        return i * d
-        """
-        #return self.act(y)
-        self.clip_values.to(x)
-        return torch.clip(y, self.clip_values[:,0], self.clip_values[:,1])
-
-        #return (0.5 * torch.clip(y, -1.0, 1.0) + 0.5) * (self.clip_values[:, 1] - self.clip_values[:, 0]) + self.clip_values[:, 0]
+        return self.renorm(y)
 
 class Dataset:
     def __init__(
@@ -358,7 +370,7 @@ class Dataset:
         if augmentation:
 
             self.ops = [
-                            shift(pixel_range = [-20, 20], dim = 'y', prob = 0.2), 
+                            shift(pixel_range = [-5, 5], dim = 'y', prob = 0.2), 
                             #affine()
                        ]
 
@@ -366,6 +378,24 @@ class Dataset:
 
     def __len__(self):
         return self.length
+
+    def get_attr_z(self):
+
+        mean, std = None, None
+
+        eps = 1e-6
+
+        if isinstance(self.attributes[0][1], list):
+
+            _array = np.array([x[1][:size_of_alpha] for x in self.attributes])
+            mean = _array.mean(axis = 0, keepdims = True)
+            std = _array.std(axis = 0, keepdims = True) + eps
+        else:
+
+            mean = self.attributes[:, 1, :size_of_alpha].mean(axis = 0, keepdims = True)
+            std = self.attributes[:, 1, :size_of_alpha].std(axis = 0, keepdims = True)
+
+        return torch.tensor(np.concatenate((mean, std), axis = 0))
 
     def get_attr_max(self):
         if isinstance(self.attributes[0][1], list):
@@ -515,6 +545,8 @@ def aligner(
     decoder.to(device)
 
     datasets_list = []
+    renorm = "clip" if not hasattr(config.net, "renorm") else config.net.renorm
+
     for _config in config.data:
         dataset_config = _config.dataset
         dataset = Dataset(os.path.join(current_pwd, dataset_config.attr_path),\
@@ -526,7 +558,12 @@ def aligner(
                           is_abs = (config.net.norm_type == "minmax_constant_no_norm")
                           )
         datasets_list.append(dataset)
-        max_values = dataset.get_attr_max()
+        
+
+    
+        clip_values = dataset.get_attr_max()
+        if renorm == "znorm":
+            values = dataset.get_attr_z()
         offset_range = dataset.offset_range
     dataset = torch.utils.data.ConcatDataset(datasets_list)
     dataloader = DataLoader(dataset, batch_size = config.batchsize, shuffle = True, num_workers = 8)
@@ -550,7 +587,8 @@ def aligner(
                     norm_type = 'linear' if not hasattr(net_config, "norm_type") else net_config.norm_type, \
                     _min = offset_range[0], \
                     _max = offset_range[1],
-                    norm_dim = [0, 1] if not hasattr(net_config, "norm_dim") else net_config.norm_dim
+                    norm_dim = [0, 1] if not hasattr(net_config, "norm_dim") else net_config.norm_dim,
+                    renorm = renorm
                    ) 
 
     best_nme = 100.0
@@ -565,7 +603,9 @@ def aligner(
             #best_nme = state_dict['best_value']
             logger.info(f"load weight and nme : {best_nme}")
         net.load_state_dict(weight, False)
-    net.set_attr(max_values)
+    net.set_clip(clip_values)
+    if renorm == "znorm":
+        net.set_z_attr(values)
     net.to(device)
     # enable calculate derivate.
     for p in net.parameters():
@@ -596,7 +636,6 @@ def aligner(
             offset = offset.to(device)
             d_loss_value = 0.0
             pred_attr = net(offset)
-
             n = attr.shape[0]
             w_with_pose = poses[0].repeat(n,1,1)
             style_space_latent = decoder.get_style_space(w_with_pose)
@@ -621,13 +660,13 @@ def aligner(
             if idx % config.show_internal == 0:
                 logger.info(f"epoch:{epoch}: {idx+1}/{len(dataloader)} loss {loss_value.mean().item()}, image_loss {image_loss_value.mean().item()} i_loss {i_loss_value.mean().item()} ")
                 writer.add_scalar("loss", loss_value.mean().item(), total_count)
-                images_in_training = torch.cat((image, image_gt), dim =2)
-                writer.add_image(f'image', make_grid(images_in_training.detach(),normalize=True, scale_each=True), total_count)
-
+                #images_in_training = torch.cat((image, image_gt), dim =2)
+                #writer.add_image(f'image', make_grid(images_in_training.detach(),normalize=True, scale_each=True), total_count)
         psnr_value = 0.0
         nme_value = 0.0
         acc_value = 0.0
         sim_value = 0.0
+        """
         # validate 
         net.eval()
         for idy, data in enumerate(val_dataloader):
@@ -671,11 +710,11 @@ def aligner(
         writer.add_scalar("nme", nme_value ,global_step = epoch)
         writer.add_scalar("psnr", psnr_value ,global_step = epoch)
         net.train()
-        if psnr_value > best_psnr:
-            last_path =  os.path.join(snapshots, "best.pth")
-            best_psnr = psnr_value
-            torch.save(dict(weight = net.state_dict(), best_value = best_psnr, epoch = epoch), last_path)
-            logger.info(f"{epoch} weight saved.")
+        """
+        last_path =  os.path.join(snapshots, "best.pth")
+        best_psnr = psnr_value
+        torch.save(dict(weight = net.state_dict(), best_value = best_psnr, epoch = epoch), last_path)
+        logger.info(f"{epoch} weight saved.")
         sche.step()
         writer.add_scalar("learning rate", optimizer.param_groups[0]['lr'] ,global_step = epoch)
     return last_path
@@ -697,13 +736,14 @@ def sync_lip_validate(
                       pti_weight_path: str,
                       pose_latent_path: str,
                       attributes_path: str,
-                      e4e_latent_path: str,
+                      id_landmark_path: str,
                       save_path: str,
                       video_landmark_path: str,
                       driving_images_dir: str = None,
                       **kwargs
                      ):
 
+    supress = kwargs.get("supress", "linear")
 
     assert save_path.endswith('mp4'), "expected postfix mp4, but got is {save_path}."
 
@@ -712,6 +752,7 @@ def sync_lip_validate(
         config = edict(yaml.load(f, Loader = yaml.CLoader))
 
     net_config = config.net
+    renorm = "clip" if not hasattr(net_config, "renorm") else net_config.renorm
     net = offsetNet(\
                     net_config.in_channels * 2, size_of_alpha, \
                     net_config.depth, \
@@ -720,9 +761,9 @@ def sync_lip_validate(
                     batchnorm = True if not hasattr(net_config, "batchnorm") else net_config.batchnorm, \
                     skip = False if not hasattr(net_config, "skip") else net_config.skip, \
                     norm_type = 'linear' if not hasattr(net_config, "norm_type") else net_config.norm_type, \
-                    norm_dim = [0, 1] if not hasattr(net_config, "norm_dim") else net_config.norm_dim
+                    norm_dim = [0, 1] if not hasattr(net_config, "norm_dim") else net_config.norm_dim, \
+                    renorm = renorm
                    )
-    logger.info(net)
     net.to(device)
     state_dict = torch.load(offset_weight_path)
     weight = state_dict
@@ -738,34 +779,39 @@ def sync_lip_validate(
     decoder.load_state_dict(torch.load(pti_weight_path), False)
     decoder.to(device)
     attributes = torch.load(attributes_path)
-    get_disentangled_landmarks = DisentangledLandmarks()
-    id_path = e4e_latent_path.replace("pt", "txt")
-    if os.path.exists(id_path):
-        with open(id_path, 'r') as f:
-            selected_id = int(f.readlines()[0].strip())
-    else:
-        _, selected_id_image, selected_id_latent, selected_id = torch.load(e4e_latent_path)
-        with open(id_path, 'w') as f:
-            f.write(str(selected_id))
+
+    #get_disentangled_landmarks = DisentangledLandmarks()
+    #id_path = e4e_latent_path.replace("pt", "txt")
+    #if os.path.exists(id_path):
+    #    with open(id_path, 'r') as f:
+    #        selected_id = int(f.readlines()[0].strip())
+    #else:
+    #    _, selected_id_image, selected_id_latent, selected_id = torch.load(e4e_latent_path)
+    #    with open(id_path, 'w') as f:
+    #        f.write(str(selected_id))
 
     if isinstance(landmarks, str):
         landmarks = np.load(landmarks)[...,:2]
 
     # hard code id video landmarks.
-    id_landmarks = np.load(video_landmark_path)[selected_id - 1:selected_id, :]
+    id_landmarks = np.load(os.path.join(current_pwd, config.val.id_landmark_path))
 
-    # 
-
-
-
-    shift_y = [landmarks[:, 54, 1] - id_landmarks[:, 54, 1],
+    shift_y = [
+               landmarks[:, 54, 1] - id_landmarks[:, 54, 1],
                landmarks[:, 60, 1] - id_landmarks[:, 60, 1],
-               landmarks[:, 6, 1] - id_landmarks[:, 6, 1],
-               landmarks[:, 10, 1] - id_landmarks[:, 10, 1]]
-    shift_y = np.stack(shift_y, axis = 1).max(axis=1)
+               #landmarks[:, 6, 1] - id_landmarks[:, 6, 1],
+               #landmarks[:, 10, 1] - id_landmarks[:, 10, 1]
+              ]
+    
+    shift_y = np.stack(shift_y, axis = 1)
+    shift_empty = np.zeros((landmarks.shape[0], 1))
+    plus = shift_y.mean(axis = 1) > 0
+    shift_empty[plus, 0] = shift_y[plus, :].max(axis = 1)
+    minus = shift_y.mean(axis = 1) < 0
+    shift_empty[minus, 0] = shift_y[minus, :].min(axis = 1)
+    shift_y = shift_empty
     landmarks[:,:,1] = landmarks[:,:,1] - shift_y.reshape(-1, 1)
-    landmark_offsets = np.concatenate(((landmarks - id_landmarks)[:, 48:68, :], (landmarks - id_landmarks)[:, 6:11, :]), axis = 1)
-    #landmark_offsets[:,:, 1] = landmark_offsets[:, :, 1] - shift_y.reshape(-1, 1)
+    landmark_offsets = np.concatenate(((landmarks - id_landmarks)[:, 48:68, :], (landmarks - id_landmarks)[:, 6:11, :]), axis = 1) #landmarks - id_landmarks #np.concatenate(((landmarks - id_landmarks)[:, 48:68, :], (landmarks - id_landmarks)[:, 6:11, :]), axis = 1)
 
     driving_files = None
     if driving_images_dir is not None:
@@ -774,22 +820,49 @@ def sync_lip_validate(
         driving_files = [os.path.join(driving_images_dir, x) for x in driving_files]
 
     frames = kwargs.get("frames", -1)
-    n = min(landmark_offsets.shape[0], len(attributes), len(os.listdir(pose_latent_path))) if frames == -1 else frames
+    n = min(landmark_offsets.shape[0], len(attributes)) if frames == -1 else frames
     t = Timer()
     p_bar = tqdm.tqdm(range(n))
     detector = get_detector()
     face_parse_func = face_parsing()
+ 
+    #from .rpc import Decoder_with_rpc
+
+    class get_pose:
+        def __init__(
+                       self,
+                       pose_latent_path
+                    ):
+            if os.path.isdir(pose_latent_path):
+                self.pose = pose_latent_path
+            else:
+                self.pose = torch.load(pose_latent_path)
+
+        def __call__(self, i):
+            if isinstance(self.pose, str):
+                return torch.load(os.path.join(pose_latent_path, f'{i + 1}.pt'))
+            else:
+                return self.pose[i]
+
+    #decoder = Decoder_with_rpc("")
+
+    get_pose_func = get_pose(pose_latent_path)
     with imageio.get_writer(save_path, fps = 25) as writer:
         for i in p_bar:
             attribute = attributes[i]
-            w_plus_with_pose = torch.load(os.path.join(pose_latent_path, f'{i + 1}.pt'))
+            w_plus_with_pose = get_pose_func(i) #torch.load(os.path.join(pose_latent_path, f'{i + 1}.pt'))
             style_space_latent = decoder.get_style_space(w_plus_with_pose)
             landmark_offset = torch.from_numpy(landmark_offsets[i]).unsqueeze(0).float().to(device)
 
+            #ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1]).reshape(1, -1).to(device), [0, len(alphas)])
             ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1][size_of_alpha:]).reshape(1, -1).to(device), [8, len(alphas)])
             with torch.no_grad():
-                offset = net(landmark_offset) 
-            ss_updated = update_lip_region_offset(ss_updated, offset, version = 'v2')
+                offset = net(landmark_offset)
+            ss_updated = update_lip_region_offset(ss_updated, offset)
+
+            #ss_updated_cpu = [x.detach().cpu().numpy() for x in ss_updated]
+            #output = decoder(ss_updated_cpu)
+
             output = np.clip(from_tensor(decoder(ss_updated) * 0.5 + 0.5) * 255.0, 0.0, 255.0)
             h,w = output.shape[:2]
 
@@ -812,9 +885,14 @@ def sync_lip_validate(
                 image = cv2.resize(image, (w,h))
                 output = cv2.resize(output, (w,h))
                 mask = face_parse_func(image)
-
                 blender = kwargs.get("blender", None)
                 output = merge_from_two_image(image, output, mask = mask, blender = blender)
+
+                landmark = landmarks[i, ...]
+
+               
+                image = draw_multiple_landmarks([landmark ,id_landmarks[0]])
+
                 output = np.concatenate((output, image), axis = 0)
             writer.append_data(np.uint8(output))
 
