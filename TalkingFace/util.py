@@ -95,7 +95,7 @@ def merge_from_two_image(
             #mask = cv2.GaussianBlur(mask, (101, 101), 11)
             #if mask.ndim < 3:
             #    mask = mask[..., np.newaxis]
-        #mask = cv2.boxFilter(mask.astype(np.float32), -1, ksize = (21, 21))
+        mask = cv2.boxFilter(mask.astype(np.float32), -1, ksize = (21, 21))
         if mask.ndim < 3:
             mask = mask[..., np.newaxis]
         merge_mask = mask

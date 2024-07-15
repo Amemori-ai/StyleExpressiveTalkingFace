@@ -16,6 +16,8 @@ def infer(
     with open(config_path) as f:
         config = edict(yaml.load(f, Loader = yaml.CLoader))
 
+    supress = "linear" if not hasattr(config, "supress") else config.supress
+
     landmarks_path = config.landmarks_path
     landmarks_name = os.path.basename(landmarks_path).split('.')[0].split('_')[-1]
 
@@ -39,7 +41,7 @@ def infer(
     pose_exp_name = pose_latent_path.split('/')[-2]
 
     if not save_path.endswith("mp4"):
-        save_path = os.path.join(save_path, net_exp_name + '_' + pti_exp_name + '_' + pose_exp_name + '_' + landmarks_name +  '.mp4')
+        save_path = os.path.join(save_path, net_exp_name + '_' + pti_exp_name + '_' + pose_exp_name + '_' + landmarks_name + '_' + supress + '.mp4')
     driving_images_dir = None
     if hasattr(config, "driving_images_dir"):
         driving_images_dir = config.driving_images_dir
@@ -57,7 +59,8 @@ def infer(
                       driving_images_dir,
                       resolution = config.resolution,
                       blender = blender,
-                      frames = frames if not hasattr(config, "frames") else config.frames
+                      frames = frames if not hasattr(config, "frames") else config.frames,
+                      supress = supress
                      )
 @click.command()
 @click.option('--config_path')
