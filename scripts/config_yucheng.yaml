@@ -1,22 +1,26 @@
-landmarks_path: "/data1/chenlong/local_code/StyleExpressiveTalkingFace-master/tx_lm2d.npy"
+landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_byx.npy"
 #landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/Yd7ehnqJ/train_landmarks.npy"
 net:
-    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp097/config.yaml"
-    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp097/snapshots/best.pth"
+    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp134/config.yaml"
+    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp134/snapshots/best.pth"
 
+#net:
+#    config: "/data1/chenlong/online_model_set/speed/exp_speed_v3/lm_train/scripts/Yd7ehnqJ/config.yaml"
+#    weight: "/data1/chenlong/online_model_set/speed/exp_speed_v3/lm_train/results/Yd7ehnqJ/snapshots/best.pth"
 pti:
-    weight: "/data1/chenlong/online_model_set/exp_ori/Yd7ehnqJ/results/pti_ft_512/snapshots/"
+    weight: "/data1/chenlong/online_model_set/speed/exp_speed_v3/exp/Yd7ehnqJ/v3_pti_512_ft5/snapshots"
 
-attr_path: "/data1/chenlong/online_model_set/lm_train_data_20240709/datasets/Yd7ehnqJ/attribute.pt"
+attr_path: "/data1/chenlong/online_model_set/speed/exp_speed_v3/lm_train/datasets/Yd7ehnqJ/attribute.pt"
 
-e4e_path: "/data1/chenlong/online_model_set/lm_train_data_20240709/datasets/Yd7ehnqJ/id.pt"
+e4e_path: "/data1/chenlong/online_model_set/speed/exp_speed_v3/lm_train/datasets/Yd7ehnqJ/id.pt"
 
-pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/Yd7ehnqJ/pose_finetuning.pt"
+pose_latent_path: "/data1/chenlong/online_model_set/speed/exp_speed_v3/exp/Yd7ehnqJ///pose"
 
-video_landmark: "/data1/chenlong/online_model_set/lm_train_data_20240709/datasets/Yd7ehnqJ/lm3d_e4e.npy"
-id_landmark: "/data1/chenlong/online_model_set/lm_train_data_20240709/datasets/Yd7ehnqJ/id_landmark.npy"
+video_landmark: "/data1/chenlong/online_model_set/speed/exp_speed_v3/lm_train/datasets/Yd7ehnqJ/lm3d.npy"
+id_landmark: "/data1/chenlong/online_model_set/speed/exp_speed_v3/lm_train/datasets/Yd7ehnqJ/id_landmark.npy"
 
-driving_images_dir: "/data1/chenlong/online_model_set/face/Yd7ehnqJ/face"
+driving_images_dir: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/outoutP/smooth"
+#driving_images_dir: "/data1/chenlong/online_model_set/face/Yd7ehnqJ/face"
 
 resolution: 512
-frames: 100
+frames: -1

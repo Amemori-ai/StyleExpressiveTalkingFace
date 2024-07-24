@@ -27,7 +27,6 @@ from torch.utils.data import DataLoader, ConcatDataset
 from TalkingFace.util import merge_from_two_image
 
 current_pwd = os.getcwd()
-logger.info(current_pwd)
 
 from .get_disentangle_landmarks import DisentangledLandmarks, landmarks_visualization, draw_landmarks, draw_multiple_landmarks
 where_am_i = os.path.dirname(os.path.realpath(__file__))
@@ -37,7 +36,7 @@ from ExpressiveEncoding.train import StyleSpaceDecoder, stylegan_path, from_tens
                                      PoseEdit, get_detector, get_face_info, \
                                      gen_masks, to_tensor, imageio
 
-from .module import BaseLinear
+from .module import BaseLinear, BaseConv2d, Flatten
 from .equivalent_offset import fused_offsetNet
 from ExpressiveEncoding.loss.FaceParsing.model import BiSeNet
 
@@ -52,7 +51,7 @@ norm_torch = lambda x: ((x - x.amin(axis = (0,1), keepdim = True)) / (x.amax(axi
 
 _linear = lambda x: x
 _minmax = lambda x: (((x - x.amin(dim = (0,1), keepdim = True)) / (x.amax(dim = (0,1), keepdim = True) - x.amin(dim = (0,1), keepdim = True))) - 0.5) * 2
-_normal = lambda x: x / 512
+_normal = lambda x: (x / 255 - 0.5) * 2
 _minmax_inner = lambda x: (((x - x.amin(dim = (1), keepdim = True)) / (x.amax(dim = (1), keepdim = True) - x.amin(dim = (1), keepdim = True) + 1e-4)) - 0.5) * 2
 
 exp_supress = lambda x: (1 / (1 + torch.exp(-4 * (x - 0.5))))
@@ -244,26 +243,12 @@ class offsetNet(nn.Module):
 
         dropout = kwargs.get("dropout", False)
         skip = kwargs.get("skip", False)
-        batchnorm = kwargs.get("batchnorm", True)
-        is_refine = kwargs.get("is_refine", False)
+        norm = kwargs.get("norm", "BatchNorm1d")
 
         renorm = kwargs.get("renorm", "clip")
-        
-
-        if depth > 0:
-            _modules = [nn.Linear(in_channels, base_channels)] + ([torch.nn.Dropout1d(0.5)] if dropout else []) + \
-                       [*([BaseLinear(base_channels, base_channels, skip = skip, batchnorm = batchnorm)] +  ([torch.nn.Dropout1d(0.5)] if dropout else []))] * depth + \
-                       [*([nn.Linear(base_channels, out_channels)] + ([torch.nn.Dropout1d(0.5)] if dropout else []))]
-        else:
-            _modules = [nn.Linear(in_channels, out_channels)]#, nn.Linear(out_channels, out_channels)]
-
-        self.net = nn.Sequential(*_modules)
-
-        self.refine = None
-
-        #self.scale = nn.Parameters(torch.ones(in_channels)
-        #self.direction = nn.Sequential(nn.Linear(base_channels, out_channels),torch.nn.Dropout1d(0.25), nn.Tanh())
-        #self.intensity = nn.Sequential(nn.Linear(base_channels, out_channels),torch.nn.Dropout1d(0.25), nn.ReLU())
+        remap = kwargs.get("remap", False) 
+        use_fourier = kwargs.get("use_fourier", False)
+        self.use_fourier = use_fourier
 
         norm_type = '_' + kwargs.get("norm_type", 'linear')
         norm_func = eval(norm_type)
@@ -282,14 +267,29 @@ class offsetNet(nn.Module):
                 _max = torch.zeros((1,dim_size,2))
             self.register_buffer('_min', _min)
             self.register_buffer('_max', _max)
+        if use_fourier:
+            if "pos" in kwargs:
+                pos = kwargs["pos"][None, :, :]
+            else:
+                pos = np.zeros((1, in_channels // 2, 2))
+            self.register_buffer("pos", torch.tensor((pos / 512).astype(np.float32)))
+            in_channels *= 2
+
+        self._build_net(in_channels, base_channels, out_channels, depth, **kwargs)
+
         self.norm_type = norm_type
         self.norm = norm_func
 
         self.register_buffer("clip_values", torch.ones((out_channels, 2), dtype = torch.float32))
-        if renorm == "clip":
+        if renorm == "repa":
+            def repa(x):
+                self.clip_values.to(x)
+                return (torch.clip(x, -1.0, 1.0) * 0.5 + 0.5) * (self.clip_values[:, 1] - self.clip_values[:,0]) + self.clip_values[:, 0]
+            self.renorm = repa
+        elif renorm == "clip":
             def clip(x):
                 self.clip_values.to(x)
-                return torch.clip(x, self.clip_values[:,0], self.clip_values[:,1])
+                return torch.clip(x, self.clip_values[:,0], self.clip_values[:, 1])
             self.renorm = clip
         elif renorm == "znorm":
             self.register_buffer("z_values", torch.ones((2, out_channels), dtype = torch.float32))
@@ -299,6 +299,27 @@ class offsetNet(nn.Module):
             self.renorm = renorm
         else:
             raise RuntimeError("unexpected renorm function.")
+
+    def _build_net(self,
+                   in_channels,
+                   base_channels,
+                   out_channels,
+                   depth,
+                   skip = False,
+                   norm = "BatchNorm1d",
+                   dropout = False,
+                   remap = False,
+                   **kwargs
+                  ):
+        if depth > 0:
+            _modules = [nn.Linear(in_channels, base_channels)] + ([torch.nn.Dropout1d(0.5)] if dropout else []) + \
+                       [*([BaseLinear(base_channels, base_channels, skip = skip, norm = norm)] +  ([torch.nn.Dropout1d(0.5)] if dropout else []))] * depth + \
+                       [*([nn.Linear(base_channels, out_channels)] + ([torch.nn.Dropout1d(0.5)] if dropout else []))]
+        else:
+            _modules = [nn.Linear(in_channels, base_channels), nn.Linear(base_channels, out_channels)] #nn.ReLU(),
+        if remap:
+            _modules += [nn.Linear(out_channels, out_channels, bias = False)]
+        self.net = nn.Sequential(*_modules)
 
     def set_clip(self, clip_values: torch.Tensor):
         self.clip_values = clip_values
@@ -315,11 +336,70 @@ class offsetNet(nn.Module):
                 x = self.norm(x, self._min, self._max)
         else:
             x = self.norm(x)
-
         n = x.shape[0]
+        if hasattr(self, "pos"):
+            x = torch.cat((x, self.pos.repeat(n,1 ,1)), dim = 1)
+
         x = x.reshape(n, -1)
         y = self.net(x)
         return self.renorm(y)
+
+class offsetNetV2(offsetNet):
+
+    def _build_net(self,
+                   in_channels,
+                   base_channels,
+                   out_channels,
+                   depth,
+                   skip = False,
+                   norm = "BatchNorm2d",
+                   dropout = False,
+                   remap = False,
+                   **kwargs
+                  ):
+
+        LOG2 = lambda x: np.log10(x) / np.log10(2)
+
+        from_size = kwargs.get("from_size", 128)
+        target_size = kwargs.get("target_size", 1)
+        max_channels = kwargs.get("max_channels", 128)
+        act = kwargs.get("act", "ReLU")
+
+        self.from_size = from_size
+
+        layers = int(LOG2(from_size))
+
+        channels = [base_channels * (2 ** i) for i in range(layers)]
+        channels = [x if x <= max_channels else max_channels for x in channels]
+
+        _modules = [ 
+                     nn.AdaptiveMaxPool2d(from_size),
+                     nn.Conv2d(in_channels, base_channels, 3, 1, 1)             
+                   ]
+
+        in_c = base_channels
+        for i in range(layers):
+            out_c = channels[i]
+            _modules += [BaseConv2d(in_c, out_c, 3, 2, 1, act = act)]
+            in_c = out_c
+
+        _modules += [Flatten(), nn.Linear(in_c, out_channels)]
+        self.net = nn.Sequential(*_modules)
+
+    def forward(self, x):
+        
+
+        if self.norm_type == '_minmax_constant' or self.norm_type == "_minmax_constant_no_norm" or self.norm_type == "_minmax_constant_no_clip":
+            if self.norm_type == "_minmax_constant_no_clip":
+                x = self.norm(x, self._min, self._max, exp_supress)
+            else:
+                x = self.norm(x, self._min, self._max)
+        else:
+            x = self.norm(x)
+
+        y = self.net(x)
+        return self.renorm(y)
+
 
 class Dataset:
     def __init__(
@@ -330,7 +410,8 @@ class Dataset:
                  id_landmark_path :str, 
                  augmentation: bool = False,
                  norm_dim: list = [0, 1],
-                 is_abs: bool = False
+                 is_abs: bool = False,
+                 is_flow_map: bool = False
                 ):
 
         assert os.path.exists(attributes_path), f"attribute path {attributes_path} not exist."
@@ -356,8 +437,49 @@ class Dataset:
         landmarks = np.load(ldm_path)
         #assert len(attributes) == len(landmarks), "attributes length unequal with landmarks."
         id_landmark = np.load(id_landmark_path)
-        self.offsets = np.concatenate(((landmarks - id_landmark)[:, 48:68, :], (landmarks - id_landmark)[:, 6:11, :]), axis = 1)
-        self.offset_range = self.get_offset_range(self.offsets, norm_dim, is_abs)
+
+        if is_flow_map:
+            
+            class get_maps:
+                def renorm(self, x):
+                    return 2 * ((x - x.min(axis = 0)) / (x.max(axis = 0) - x.min(axis = 0)) - 0.5)
+
+                def __getitem__(self, index):
+
+                    scale = 64
+                    pad = 10
+                    _id_landmarks = self.renorm(np.concatenate((id_landmark[0, 6:11,:],id_landmark[0, 48:68,:]), axis = 0))
+                    _landmarks = self.renorm(np.concatenate((landmarks[index, 6:11,:],landmarks[index, 48:68,:]), axis = 0))
+
+                    _id_landmarks = _id_landmarks * scale / 2 + scale / 2 + pad / 2
+                    _landmarks = _landmarks * scale / 2 + scale / 2 + pad / 2
+
+                    id_map = np.zeros((scale + pad, scale + pad, 3), np.uint8)
+                    cv2.polylines(id_map, [_id_landmarks[0:5,:].astype(np.int32)], False, (255, 255, 255), 2)
+                    cv2.polylines(id_map, [_id_landmarks[5:25,:].astype(np.int32)], True, (255, 255, 255), 2)
+
+                    landmark_map = np.zeros((scale + pad , scale + pad, 3), np.uint8)
+                    cv2.polylines(landmark_map, [_landmarks[0:5,:].astype(np.int32)], False, (255, 255, 255), 2)
+                    cv2.polylines(landmark_map, [_landmarks[5:25,:].astype(np.int32)], True, (255, 255, 255), 2)
+                    return ((np.concatenate((landmark_map[..., 0:1], id_map[..., 0:1]), axis = 2) / 255.0 - .5) * 2).transpose((2, 0, 1)) 
+            """
+            class get_maps:
+                def __getitem__(self, index):
+                    id_map = np.zeros((512, 512, 3), np.uint8)
+                    cv2.polylines(id_map, [id_landmark[0, 6:11,:].astype(np.int32)], False, (255, 255, 255), 2)
+                    cv2.polylines(id_map, [id_landmark[0, 48:68,:].astype(np.int32)], True, (255, 255, 255), 2)
+
+                    landmark_map = np.zeros((512, 512, 3), np.uint8)
+                    cv2.polylines(landmark_map, [landmarks[index, 6:11,:].astype(np.int32)], False, (255, 255, 255), 2)
+                    cv2.polylines(landmark_map, [landmarks[index, 48:68,:].astype(np.int32)], True, (255, 255, 255), 2)
+                    return ((np.concatenate((landmark_map[..., 0:1], id_map[..., 0:1]), axis = 2) / 255.0 - .5) * 2).transpose((2, 0, 1)) 
+            """
+            self.offsets = get_maps()
+            self.offset_range = (0, 255)
+
+        else:
+            self.offsets = np.concatenate(((landmarks - id_landmark)[:, 48:68, :], (landmarks - id_landmark)[:, 6:11, :]), axis = 1)
+            self.offset_range = self.get_offset_range(self.offsets, norm_dim, is_abs)
 
         #self.offsets = norm(self.offsets)
         self.length = len(self.attributes) #round(len(self.attributes) * ratio)
@@ -546,6 +668,7 @@ def aligner(
 
     datasets_list = []
     renorm = "clip" if not hasattr(config.net, "renorm") else config.net.renorm
+    _reload = True if not hasattr(config, "reload") else config.reload
 
     for _config in config.data:
         dataset_config = _config.dataset
@@ -555,11 +678,10 @@ def aligner(
                           os.path.join(current_pwd, dataset_config.id_landmark_path), \
                           augmentation = False if not hasattr(dataset_config,"augmentation") else dataset_config.augmentation, \
                           norm_dim = [0, 1] if not hasattr(config.net, "norm_dim") else config.net.norm_dim,
-                          is_abs = (config.net.norm_type == "minmax_constant_no_norm")
-                          )
+                          is_abs = (config.net.norm_type == "minmax_constant_no_norm"),
+                          is_flow_map = False if not hasattr(dataset_config,"is_flow_map") else dataset_config.is_flow_map
+                        )
         datasets_list.append(dataset)
-        
-
     
         clip_values = dataset.get_attr_max()
         if renorm == "znorm":
@@ -569,28 +691,49 @@ def aligner(
     dataloader = DataLoader(dataset, batch_size = config.batchsize, shuffle = True, num_workers = 8)
 
     dataset_config = config.val
-    val_dataset = Dataset(os.path.join(current_pwd, dataset_config.attr_path), os.path.join(current_pwd,dataset_config.ldm_path), os.path.join(current_pwd, dataset_config.id_path), os.path.join(current_pwd, dataset_config.id_landmark_path))
+    val_dataset = Dataset(
+                           os.path.join(current_pwd, dataset_config.attr_path), 
+                           os.path.join(current_pwd,dataset_config.ldm_path), 
+                           os.path.join(current_pwd, dataset_config.id_path), 
+                           os.path.join(current_pwd, dataset_config.id_landmark_path),
+                           is_flow_map = False if not hasattr(dataset_config,"is_flow_map") else dataset_config.is_flow_map
+                         )
     val_dataloader = DataLoader(val_dataset, batch_size = config.batchsize, shuffle = False)
 
     # init net
     net_config = config.net
-    is_refine = False if not hasattr(net_config, "is_refine") else net_config.is_refine
 
-    net = offsetNet(\
-                    net_config.in_channels * 2, size_of_alpha, \
+    name = "offsetNet" if not hasattr(net_config, "name") else net_config.name
+
+    is_refine = False if not hasattr(net_config, "is_refine") else net_config.is_refine
+    remap = False if not hasattr(net_config, "remap") else net_config.remap
+    use_fourier = False if not hasattr(net_config, "use_fourier") else net_config.use_fourier
+    pos = None
+    if use_fourier:
+        pos = np.load(os.path.join(current_pwd, dataset_config.id_landmark_path))
+        pos = np.concatenate(((pos)[0, 48:68, :], (pos)[0, 6:11, :]), axis = 0)
+
+
+    net = eval(name)(\
+                    net_config.in_channels * 2 if name == "offsetNet" else net_config.in_channels, size_of_alpha, \
                     net_config.depth, \
                     base_channels = 512 if not hasattr(net_config, "base_channels") else net_config.base_channels , \
                     dropout = False if not hasattr(net_config, "dropout") else net_config.dropout, \
-                    batchnorm = True if not hasattr(net_config, "batchnorm") else net_config.batchnorm, \
+                    norm = "BatchNorm1d" if not hasattr(net_config, "norm") else net_config.norm, \
                     skip = False if not hasattr(net_config, "skip") else net_config.skip, \
                     is_refine = is_refine, \
                     norm_type = 'linear' if not hasattr(net_config, "norm_type") else net_config.norm_type, \
                     _min = offset_range[0], \
                     _max = offset_range[1],
                     norm_dim = [0, 1] if not hasattr(net_config, "norm_dim") else net_config.norm_dim,
-                    renorm = renorm
+                    renorm = renorm,
+                    remap = remap,
+                    use_fourier = use_fourier,
+                    pos = pos,
+                    from_size = 512 if not hasattr(net_config, "from_size") else net_config.from_size,
+                    act = "ReLU" if not hasattr(net_config, "act") else net_config.act
                    ) 
-
+    logger.info(net)
     best_nme = 100.0
     best_psnr = 0.0
     best_acc = 0.0
@@ -600,7 +743,8 @@ def aligner(
         weight = state_dict
         if "best_value" in state_dict :
             weight = state_dict['weight']
-            #best_nme = state_dict['best_value']
+            if _reload:
+                best_nme = state_dict['best_value']
             logger.info(f"load weight and nme : {best_nme}")
         net.load_state_dict(weight, False)
     net.set_clip(clip_values)
@@ -611,10 +755,10 @@ def aligner(
     for p in net.parameters():
         p.requires_grad = True
 
-    optimizer = torch.optim.Adam(net.parameters(), lr = net_config.lr)
+    optimizer = torch.optim.AdamW(net.parameters(), lr = net_config.lr) #Adam(net.parameters(), lr = net_config.lr)
     sche = torch.optim.lr_scheduler.StepLR(optimizer, config.optim.step, gamma = config.optim.gamma)
-    loss_d = torch.nn.CosineSimilarity(dim = 0)
-    loss_i = SmoothL1LossMyself() #torch.nn.MSELoss()
+    loss_d = torch.nn.CosineSimilarity(dim = 1)
+    loss_i = L1LossMyself() #torch.nn.MSELoss()
     loss_image = torch.nn.L1Loss()
 
     start_epoch = 1 if not hasattr(config, "start_epoch") else config.start_epoch
@@ -652,7 +796,7 @@ def aligner(
             #d_loss_value = 1 - loss_d(pred_attr, attr).mean() 
             i_loss_value = loss_i(attr, pred_attr)
 
-            loss_value = i_loss_value * 1.0 + image_loss_value * 1.0
+            loss_value = i_loss_value * 1.0 + d_loss_value * 5.0 + image_loss_value * 1.0
             loss_value.backward()
             optimizer.step()
             total_count += 1
@@ -744,7 +888,6 @@ def sync_lip_validate(
                      ):
 
     supress = kwargs.get("supress", "linear")
-
     assert save_path.endswith('mp4'), "expected postfix mp4, but got is {save_path}."
 
     device = "cuda:0"
@@ -753,16 +896,23 @@ def sync_lip_validate(
 
     net_config = config.net
     renorm = "clip" if not hasattr(net_config, "renorm") else net_config.renorm
-    net = offsetNet(\
-                    net_config.in_channels * 2, size_of_alpha, \
+    remap = False if not hasattr(net_config, "remap") else net_config.remap
+    use_fourier = False if not hasattr(net_config, "use_fourier") else net_config.use_fourier
+    name = "offsetNet" if not hasattr(net_config, "name") else net_config.name
+    net = eval(name)(\
+                    net_config.in_channels * 2 if name == "offsetNet" else net_config.in_channels, size_of_alpha, \
                     net_config.depth, \
                     base_channels = 512 if not hasattr(net_config, "base_channels") else net_config.base_channels , \
                     dropout = False if not hasattr(net_config, "dropout") else net_config.dropout, \
-                    batchnorm = True if not hasattr(net_config, "batchnorm") else net_config.batchnorm, \
+                    norm = "BatchNorm1d" if not hasattr(net_config, "norm") else net_config.norm, \
                     skip = False if not hasattr(net_config, "skip") else net_config.skip, \
                     norm_type = 'linear' if not hasattr(net_config, "norm_type") else net_config.norm_type, \
                     norm_dim = [0, 1] if not hasattr(net_config, "norm_dim") else net_config.norm_dim, \
-                    renorm = renorm
+                    renorm = renorm ,\
+                    remap = remap,
+                    use_fourier = use_fourier,
+                    from_size = 512 if not hasattr(net_config, "from_size") else net_config.from_size,
+                    act = "ReLU" if not hasattr(net_config, "act") else net_config.act
                    )
     net.to(device)
     state_dict = torch.load(offset_weight_path)
@@ -772,8 +922,8 @@ def sync_lip_validate(
         best_nme = state_dict['best_value']
         logger.info(f"load weight and nme : {best_nme}")
     net.load_state_dict(weight, False)
-
     net.eval()
+
     resolution = kwargs.get("resolution", 1024)
     decoder = StyleSpaceDecoder(stylegan_path, to_resolution = resolution)
     decoder.load_state_dict(torch.load(pti_weight_path), False)
@@ -810,8 +960,14 @@ def sync_lip_validate(
     minus = shift_y.mean(axis = 1) < 0
     shift_empty[minus, 0] = shift_y[minus, :].min(axis = 1)
     shift_y = shift_empty
+
     landmarks[:,:,1] = landmarks[:,:,1] - shift_y.reshape(-1, 1)
-    landmark_offsets = np.concatenate(((landmarks - id_landmarks)[:, 48:68, :], (landmarks - id_landmarks)[:, 6:11, :]), axis = 1) #landmarks - id_landmarks #np.concatenate(((landmarks - id_landmarks)[:, 48:68, :], (landmarks - id_landmarks)[:, 6:11, :]), axis = 1)
+    
+
+    if net_config.in_channels == 25:
+        landmark_offsets = np.concatenate(((landmarks - id_landmarks)[:, 48:68, :], (landmarks - id_landmarks)[:, 6:11, :]), axis = 1) #landmarks - id_landmarks #np.concatenate(((landmarks - id_landmarks)[:, 48:68, :], (landmarks - id_landmarks)[:, 6:11, :]), axis = 1)
+    else:
+        landmark_offsets = (landmarks - id_landmarks)[:, 48:68, :]
 
     driving_files = None
     if driving_images_dir is not None:
@@ -825,13 +981,11 @@ def sync_lip_validate(
     p_bar = tqdm.tqdm(range(n))
     detector = get_detector()
     face_parse_func = face_parsing()
- 
-    #from .rpc import Decoder_with_rpc
 
     class get_pose:
         def __init__(
-                       self,
-                       pose_latent_path
+                     self,
+                     pose_latent_path
                     ):
             if os.path.isdir(pose_latent_path):
                 self.pose = pose_latent_path
@@ -844,24 +998,53 @@ def sync_lip_validate(
             else:
                 return self.pose[i]
 
-    #decoder = Decoder_with_rpc("")
+    class get_maps:
+        def renorm(self, x):
+            return 2 * ((x - x.min(axis = 0)) / (x.max(axis = 0) - x.min(axis = 0)) - 0.5)
 
+        def __getitem__(self, index):
+
+            scale = 64
+            pad = 10
+            _id_landmarks = self.renorm(np.concatenate((id_landmarks[0, 6:11,:],id_landmarks[0, 48:68,:]), axis = 0))
+            _landmarks = self.renorm(np.concatenate((landmarks[index, 6:11,:],landmarks[index, 48:68,:]), axis = 0))
+
+            _id_landmarks = _id_landmarks * scale / 2 + scale / 2 + pad / 2
+            _landmarks = _landmarks * scale / 2 + scale / 2 + pad / 2
+
+            id_map = np.zeros((scale + pad, scale + pad, 3), np.uint8)
+            cv2.polylines(id_map, [_id_landmarks[0:5,:].astype(np.int32)], False, (255, 255, 255), 2)
+            cv2.polylines(id_map, [_id_landmarks[5:25,:].astype(np.int32)], True, (255, 255, 255), 2)
+
+            landmark_map = np.zeros((scale + pad , scale + pad, 3), np.uint8)
+            cv2.polylines(landmark_map, [_landmarks[0:5,:].astype(np.int32)], False, (255, 255, 255), 2)
+            cv2.polylines(landmark_map, [_landmarks[5:25,:].astype(np.int32)], True, (255, 255, 255), 2)
+            return ((np.concatenate((landmark_map[..., 0:1], id_map[..., 0:1]), axis = 2) / 255.0 - .5) * 2).transpose((2, 0, 1)) 
+     
+    if name == "offsetNetV2":
+        landmark_offsets = get_maps()
     get_pose_func = get_pose(pose_latent_path)
     with imageio.get_writer(save_path, fps = 25) as writer:
         for i in p_bar:
             attribute = attributes[i]
             w_plus_with_pose = get_pose_func(i) #torch.load(os.path.join(pose_latent_path, f'{i + 1}.pt'))
             style_space_latent = decoder.get_style_space(w_plus_with_pose)
-            landmark_offset = torch.from_numpy(landmark_offsets[i]).unsqueeze(0).float().to(device)
+            landmark_offset_np = landmark_offsets[i]
+            landmark_offset = torch.from_numpy(landmark_offset_np).unsqueeze(0).float().to(device)
+            with torch.no_grad():
+                offset = net(landmark_offset)
 
             #ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1]).reshape(1, -1).to(device), [0, len(alphas)])
             ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1][size_of_alpha:]).reshape(1, -1).to(device), [8, len(alphas)])
-            with torch.no_grad():
-                offset = net(landmark_offset)
             ss_updated = update_lip_region_offset(ss_updated, offset)
 
             #ss_updated_cpu = [x.detach().cpu().numpy() for x in ss_updated]
             #output = decoder(ss_updated_cpu)
+            """
+            target_path = os.path.join(current_pwd, "./pivot")
+            os.makedirs(target_path, exist_ok = True)
+            torch.save([x.detach().cpu().numpy() for x in ss_updated], os.path.join(target_path, f"{i + 1}.pt"))
+            """
 
             output = np.clip(from_tensor(decoder(ss_updated) * 0.5 + 0.5) * 255.0, 0.0, 255.0)
             h,w = output.shape[:2]
@@ -887,13 +1070,11 @@ def sync_lip_validate(
                 mask = face_parse_func(image)
                 blender = kwargs.get("blender", None)
                 output = merge_from_two_image(image, output, mask = mask, blender = blender)
+                #landmark = landmarks[i, ...]
+                #image = draw_multiple_landmarks([landmark ,id_landmarks[0]])
+                image_landmark = cv2.resize((landmark_offset_np[0:1, :, :].repeat(3, axis = 0).transpose((1,2,0)) * 0.5 + 0.5) * 255, (w,h))
+                output = np.concatenate((output, image, image_landmark), axis = 0)
 
-                landmark = landmarks[i, ...]
-
-               
-                image = draw_multiple_landmarks([landmark ,id_landmarks[0]])
-
-                output = np.concatenate((output, image), axis = 0)
             writer.append_data(np.uint8(output))
 
 def evaluate(
@@ -911,15 +1092,22 @@ def evaluate(
 
     net_config = config.net
 
-    net = offsetNet(\
-                    net_config.in_channels * 2, size_of_alpha, \
+    name = "offsetNet" if not hasattr(net_config, "name") else net_config.name
+    remap = False if not hasattr(net_config, "remap") else net_config.remap
+    use_fourier = False if not hasattr(net_config, "use_fourier") else net_config.use_fourier
+    net = eval(name)(\
+                    net_config.in_channels * 2 if name == "offsetNet" else net_config.in_channels, size_of_alpha, \
                     net_config.depth, \
                     base_channels = 512 if not hasattr(net_config, "base_channels") else net_config.base_channels , \
                     dropout = False if not hasattr(net_config, "dropout") else net_config.dropout, \
-                    batchnorm = True if not hasattr(net_config, "batchnorm") else net_config.batchnorm, \
+                    norm = "BatchNorm1d" if not hasattr(net_config, "norm") else net_config.norm, \
                     skip = False if not hasattr(net_config, "skip") else net_config.skip, \
                     norm_type = 'linear' if not hasattr(net_config, "norm_type") else net_config.norm_type, \
-                    norm_dim = [0, 1] if not hasattr(net_config, "norm_dim") else net_config.norm_dim
+                    norm_dim = [0, 1] if not hasattr(net_config, "norm_dim") else net_config.norm_dim,
+                    remap = remap,
+                    use_fourier = use_fourier,
+                    from_size = 512 if not hasattr(net_config, "from_size") else net_config.from_size,
+                    act = "ReLU" if not hasattr(net_config, "act") else net_config.act
                    )
 
     net.to(device)
@@ -944,7 +1132,13 @@ def evaluate(
     attributes = torch.load(os.path.join(current_pwd, attr_path)) 
     attribute = attributes[0]
     dataset_config = config.val
-    val_dataset = Dataset(os.path.join(current_pwd, dataset_config.attr_path), os.path.join(current_pwd,dataset_config.ldm_path), os.path.join(current_pwd, dataset_config.id_path), os.path.join(current_pwd, dataset_config.id_landmark_path))
+    val_dataset = Dataset(
+                          os.path.join(current_pwd, dataset_config.attr_path), 
+                          os.path.join(current_pwd,dataset_config.ldm_path), 
+                          os.path.join(current_pwd, dataset_config.id_path), 
+                          os.path.join(current_pwd, dataset_config.id_landmark_path),
+                          is_flow_map = False if not hasattr(dataset_config,"is_flow_map") else dataset_config.is_flow_map
+                         )
     val_dataloader = DataLoader(val_dataset, batch_size = 8, shuffle = False)
     pbar = tqdm.tqdm(val_dataloader)
     psnr_value = 0.0
