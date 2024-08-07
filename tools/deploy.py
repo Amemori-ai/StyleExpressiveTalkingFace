@@ -21,7 +21,7 @@ from itertools import chain
 from easydict import EasyDict as edict 
 from TalkingFace.aligner import offsetNet, size_of_alpha, alphas, \
                                 update_lip_region_offset, logger, update_region_offset, \
-                                face_parsing
+                                face_parsing, offsetNetV2
                                 
 from TalkingFace.ExpressiveVideoStyleGanEncoding.ExpressiveEncoding.train import stylegan_path
 from TalkingFace.ExpressiveVideoStyleGanEncoding.ExpressiveEncoding.equivalent_decoder import EquivalentStyleSpaceDecoder
@@ -59,17 +59,27 @@ class TalkingFaceModel(torch.nn.Module):
         super().__init__()
 
         renorm = "clip" if not hasattr(net_config, "renorm") else net_config.renorm
-        net = offsetNet(net_config.in_channels * 2, 
-                        size_of_alpha, 
-                        net_config.depth,
+        is_refine = False if not hasattr(net_config, "is_refine") else net_config.is_refine
+        remap = False if not hasattr(net_config, "remap") else net_config.remap
+        use_fourier = False if not hasattr(net_config, "use_fourier") else net_config.use_fourier
+        name = "offsetNet" if not hasattr(net_config, "name") else net_config.name
+        net = eval(name)(\
+                        net_config.in_channels * 2 if name == "offsetNet" else net_config.in_channels, size_of_alpha, \
+                        net_config.depth, \
                         base_channels = 512 if not hasattr(net_config, "base_channels") else net_config.base_channels , \
+                        max_channels = 128 if not hasattr(net_config, "max_channels") else net_config.max_channels , \
                         dropout = False if not hasattr(net_config, "dropout") else net_config.dropout, \
-                        batchnorm = True if not hasattr(net_config, "batchnorm") else net_config.batchnorm, \
+                        norm = "BatchNorm1d" if not hasattr(net_config, "norm") else net_config.norm, \
                         skip = False if not hasattr(net_config, "skip") else net_config.skip, \
                         norm_type = 'linear' if not hasattr(net_config, "norm_type") else net_config.norm_type, \
-                        norm_dim = [0, 1] if not hasattr(net_config, "norm_dim") else net_config.norm_dim,
-                        renorm = renorm
-                        )
+                        norm_dim = [0, 1] if not hasattr(net_config, "norm_dim") else net_config.norm_dim, \
+                        renorm = renorm ,\
+                        remap = remap,
+                        use_fourier = use_fourier,
+                        from_size = 512 if not hasattr(net_config, "from_size") else net_config.from_size,
+                        act = "ReLU" if not hasattr(net_config, "act") else net_config.act,
+                        first_convbn = False if not hasattr(net_config, "first_convbn") else net_config.first_convbn
+                       )
         logger.info(net)
         net.load_state_dict(torch.load(net_weight_path)['weight'])
         net.eval()
@@ -138,7 +148,10 @@ def deploy(
     model.eval()
     device = 'cpu'
     model.to(device)
-    _input = torch.randn(1,config.net.in_channels, 2).to(device)
+    if config.net.name == "offsetNetV2":
+        _input = torch.randn(1, config.net.in_channels, config.net.from_size, config.net.from_size)
+    else:
+        _input = torch.randn(1,config.net.in_channels, 2).to(device)
     #index = 1
     latent = torch.randn(1,18,512).to(device)
     style_space = model.decoder.get_style_space(latent)

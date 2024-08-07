@@ -1,13 +1,13 @@
 net:
-    in_channels: 25
-    depth: 1
-    lr: 0.0002
-    dropout: False
-    skip: False
-    batchnorm: True
-    is_refine: True
-    norm_type: "minmax_constant"
-    norm_dim: [0]
+    name: "offsetNetV2"
+    in_channels: 2
+    lr: 0.00005
+    depth: 0
+    norm_type: "linear"
+    base_channels: 4
+    from_size: 64
+    renorm: znorm
+    use_point: True
 
 pose_path: "./dataset/lady9_s4_20240118/pose.pt"
 attr_path: "./dataset/lady9_s4_20240118/attribute.pt"
@@ -19,20 +19,21 @@ data:
              id_path: "./dataset/lady9_s4_20240118/id.pt"
              id_landmark_path: "./dataset/lady9_s4_20240118/id_landmark.npy"
              augmentation: True
+             is_flow_map: True
 
 val:
-    attr_path: "./dataset/lady9_s4_20240118/val_attr.pt"
-    ldm_path: "./dataset/lady9_s4_20240118/val_landmarks.npy"
+    attr_path: "./dataset/lady9_s4_20240118/train_attr.pt"
+    ldm_path: "./dataset/lady9_s4_20240118/train_landmarks.npy"
     id_path: "./dataset/lady9_s4_20240118/id.pt"
     id_landmark_path: "./dataset/lady9_s4_20240118/id_landmark.npy"
+    is_flow_map: True
 
 optim:
-    step: 150
+    step: 450
     gamma: 0.5
 
-batchsize: 128
-epochs: 450
+batchsize: 32
+epochs: 900
 show_internal: 100
 save_internal: 5
-
-
+reload: False

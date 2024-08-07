@@ -34,13 +34,13 @@ from typing import Callable, Union
 def draw_landmarks(landmarks):
     """draw landmarks function
     """
-    eye_idx = list(range(6, 11))
+    jaw_idx = list(range(6, 11))
     mouth_idx = list(range(48, 68))
     pts1, pts2 = [], []
     canvas = np.zeros((512, 512, 3), np.uint8)
     for i in range(68):
         x, y = landmarks[i]
-        if i in eye_idx:
+        if i in jaw_idx:
             pts1.append((x, y - 30))
             #landmarks[i][1] = y - 30
         elif i in mouth_idx:
