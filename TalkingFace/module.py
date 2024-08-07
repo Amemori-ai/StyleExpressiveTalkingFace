@@ -40,23 +40,21 @@ class BaseConv2d(nn.Module):
 
         if act == "ReLU":
             args = dict()
-        else:
+        elif act is not None:
             args = dict(negative_slope = 0.1)
 
         modules = [
                     nn.Conv2d(input_channels, output_channels, k, s, p),
                     getattr(nn, norm)(output_channels),
-                    getattr(nn, act)(**args)
                   ]
-
+        if act is not None:
+            act_module = getattr(nn, act)(**args) 
+            modules += [act_module]
 
         if repeat > 0:
             modules += [
-                        nn.Conv2d(output_channels, output_channels, k, s, p),
-                        getattr(nn, norm)(output_channels),
-                        getattr(nn, act)(**args)
+                         ResidualBlock(output_channels, act_module)
                        ]
-
         self.base_conv = nn.Sequential(*modules)
 
     def forward(self, x):
@@ -70,5 +68,31 @@ class Flatten(nn.Module):
         n = x.shape[0]
         return x.reshape(n, -1)
 
+class MultiFrameMerge(nn.Module):
+
+    def __init__(
+                 self, 
+                 win_size = 7
+                ):
+        super().__init__()
+
+
+class ResidualBlock(nn.Module):
+    def __init__(
+                 self, 
+                 channels: int,
+                 act: nn.Module = None
+                ):
+        super().__init__()
+        self.conv = nn.Conv2d(channels, channels, 3, 1, 1)
+        self.act = act
+        
+    def forward(self, x):
+        if self.act is not None:
+            return x + self.act(self.conv(x))
+        else:
+            return x + self.conv(x)
+
+        
 
 

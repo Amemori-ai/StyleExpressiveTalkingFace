@@ -23,7 +23,7 @@ def infer(
 
     net_config = config.net.config
     net_weight = config.net.weight
-    video_landmark_path = config.video_landmark
+    video_landmark_path = None#config.video_landmark
     
     pti_weight = config.pti.weight
 

@@ -8,7 +8,7 @@ import copy
 
 from DeepLog import logger
 
-from TalkingFace.aligner import offsetNet
+from TalkingFace.aligner import offsetNet, offsetNetV2
 from TalkingFace.equivalent_offset import fused_offsetNet
 from TalkingFace.ExpressiveVideoStyleGanEncoding.ExpressiveEncoding.train import stylegan_path
 from TalkingFace.ExpressiveVideoStyleGanEncoding.ExpressiveEncoding.equivalent_decoder import EquivalentStyleSpaceDecoder
@@ -17,12 +17,12 @@ from TalkingFace.ExpressiveVideoStyleGanEncoding.ExpressiveEncoding.decoder impo
 @pytest.mark.offset
 def test_equivalent_offset_net():
 
-    original_net = offsetNet(40, 21, depth = 1, norm_type = "minmax_constant")
-    original_net.load_state_dict(torch.load(os.path.join(os.getcwd(),"..", "results/exp062/snapshots/best.pth"))['weight'])
+    original_net = offsetNetV2(2, 21, depth = 0)
+    #original_net.load_state_dict(torch.load(os.path.join(os.getcwd(),"..", "results/exp062/snapshots/best.pth"))['weight'])
     fuse_net = fused_offsetNet(copy.deepcopy(original_net))
     fuse_net.eval()
     original_net.eval()
-    input_tensor = torch.randn(1, 20, 2)
+    input_tensor = torch.randn(1, 2, 64, 64)
     output_1 = original_net(input_tensor)
     output_2 = fuse_net(input_tensor)
     diff = torch.abs(output_1 - output_2)

@@ -9,5 +9,7 @@
   soft_mask_region : "[[340,494,130,-130],[274,340,130,-130]]",
   audio2motion_version : "20231222",
   hubert_version : "chinese",
-  addJaw: True
+  addJaw: True,
+  decoder_v2: True,
+  decoder_map_type: "polylines"
 }

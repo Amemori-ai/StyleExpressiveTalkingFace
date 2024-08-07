@@ -10,6 +10,9 @@ import tqdm
 import re
 import pdb
 import random
+import threading
+import queue
+import time
 
 import torch.nn as nn
 import numpy as np
@@ -18,12 +21,13 @@ from functools import partial
 from typing import Callable, Union, List
 from easydict import EasyDict as edict
 from PIL import Image
-
+from scipy.ndimage import gaussian_filter1d
 
 from DeepLog import logger, Timer
 from torchvision import transforms
+from torchvision.utils import make_grid
 from torch.utils.data import DataLoader, ConcatDataset
-from TalkingFace.util import merge_from_two_image
+from TalkingFace.util import merge_from_two_image, output_copy_region
 
 current_pwd = os.getcwd()
 
@@ -40,6 +44,7 @@ from .equivalent_offset import fused_offsetNet
 from ExpressiveEncoding.loss.FaceParsing.model import BiSeNet
 
 psnr_func = lambda x,y: 20 * torch.log10(1.0 / torch.sqrt(torch.mean((x - y) ** 2)))
+psnr_func_np = lambda x,y: 20 * np.log10(255.0 / np.sqrt(np.mean((x - y) ** 2)))
 #norm = lambda x: x
 #norm = lambda x: np.clip(x / 100, -1, 1)
 #norm = lambda x: ((x) / (x.max(axis = (0,1), keepdims = True)))
@@ -49,6 +54,7 @@ norm = lambda x: ((x - x.min(axis = (0,1), keepdims = True)) / (x.max(axis = (0,
 norm_torch = lambda x: ((x - x.amin(axis = (0,1), keepdim = True)) / (x.amax(axis = (0,1), keepdim = True) - x.amin(axis = (0,1), keepdim = True)) - 0.5) * 2
 
 _linear = lambda x: x
+_force_linear = lambda x: x
 _minmax = lambda x: (((x - x.amin(dim = (0,1), keepdim = True)) / (x.amax(dim = (0,1), keepdim = True) - x.amin(dim = (0,1), keepdim = True))) - 0.5) * 2
 _normal = lambda x: (x / 255 - 0.5) * 2
 _minmax_inner = lambda x: (((x - x.amin(dim = (1), keepdim = True)) / (x.amax(dim = (1), keepdim = True) - x.amin(dim = (1), keepdim = True) + 1e-4)) - 0.5) * 2
@@ -149,7 +155,7 @@ class shift(augmentation):
                  prob = 0.2
                 ):
         super().__init__(prob)
-        self.pixel_range = list(range(pixel_range[0], pixel_range[1]))
+        self.pixel_range = list(range(pixel_range[0], pixel_range[1] + 1))
         self.dim = dim
 
     def __repr__(self):
@@ -167,7 +173,6 @@ class shift(augmentation):
         if dim == 'x':
             cords[:, 0] = self._get_cord(cords[:,0])
             return cords
-
         if dim == 'y':
             cords[:, 1] = self._get_cord(cords[:,1])
             return cords
@@ -177,6 +182,99 @@ class shift(augmentation):
             return cords
 
         raise RuntimeError(f"dim {dim} type not exits.")
+
+class shift_v2(shift):
+    def __init__(
+                  self,
+                  scale: float = 1, # 2 pixel shift
+                  dim : str = 'all',
+                  diff: List = None,
+                  prob : float = 0.2
+                ):
+        super().__init__(dim = dim, prob = prob)
+        self.scale = scale
+        self.diff = diff
+
+    def __repr__(self):
+        return f'\
+                  scale: {self.scale} \
+                '
+    def _identity(self, cords, *args):
+        return cords
+
+    def _get_cord(
+                  self, 
+                  x: np.ndarray,
+                  index: int
+                 ):
+        return x + (np.random.random(x.shape)) * self.scale * self.diff[index, ...]
+
+    def forward(self, cords, index):
+        return self._get_cord(cords, index)
+
+class shift_v3(shift):
+    def __init__(
+                  self,
+                  scale: float = 1, # 2 pixel shift
+                  dim : str = 'all',
+                  prob : float = 0.2,
+                  slice : List = None
+                ):
+        super().__init__(dim = dim, prob = prob)
+        self.scale = scale
+        self.slice = slice
+
+    def __repr__(self):
+        return f'\n\
+                  scale: {self.scale}\n \
+                  slice: {self.slice}\n \
+                '
+    def _identity(self, cords, *args):
+        return cords
+
+    def _get_cord(
+                  self, 
+                  x: np.ndarray,
+                 ):
+        if self.slice is not None:
+            f, e = self.slice
+            x[f:e, :] = x[f:e, :] + (np.round(np.random.random(x[f:e, :].shape), decimals = 7) - 0.5) * 2 * self.scale
+        else:
+            x = x + (np.round(np.random.random(x.shape), decimals = 7) - 0.5) * 2 * self.scale
+        return x
+
+    def forward(self, cords):
+        return self._get_cord(cords)
+
+class shift_v4(shift):
+    def __init__(
+                  self,
+                  scale: float = 1, # 2 pixel shift
+                  dim : str = 'all',
+                  landmark: List = None,
+                  prob : float = 0.2
+                ):
+        super().__init__(dim = dim, prob = prob)
+        self.scale = scale
+        self.landmark = landmark
+
+    def __repr__(self):
+        return f'\
+                  scale: {self.scale} \
+                '
+    def _identity(self, cords, *args):
+        return cords
+
+    def _get_cord(
+                  self, 
+                  x: np.ndarray,
+                  shift: np.ndarray
+                 ):
+        return x + (np.random.random(x.shape) - 0.5) * 2 * self.scale * shift
+
+    def forward(self, cords, shift):
+        return self._get_cord(cords, shift)
+
 
 class shrinkage(augmentation):
     pass
@@ -252,7 +350,10 @@ class offsetNet(nn.Module):
         norm_type = '_' + kwargs.get("norm_type", 'linear')
         norm_func = eval(norm_type)
 
-        if norm_type == '_minmax_constant' or norm_type == "_minmax_constant_no_norm" or norm_type == "_minmax_constant_no_clip":
+        if norm_type == '_minmax_constant' \
+           or norm_type == "_minmax_constant_no_norm" \
+           or norm_type == "_minmax_constant_no_clip" \
+           or norm_type == "_force_linear":
             norm_dim = kwargs.get("norm_dim",  [0, 1])
             if norm_dim == [0, 1]:
                 dim_size = 1
@@ -294,7 +395,7 @@ class offsetNet(nn.Module):
             self.register_buffer("z_values", torch.ones((2, out_channels), dtype = torch.float32))
             def renorm(x):
                 self.z_values.to(x)
-                return x * self.z_values[1, :] + self.z_values[0, :]
+                return torch.clip(x * self.z_values[1, :] + self.z_values[0, :],  self.clip_values[:,0], self.clip_values[:, 1])
             self.renorm = renorm
         else:
             raise RuntimeError("unexpected renorm function.")
@@ -311,7 +412,7 @@ class offsetNet(nn.Module):
                    **kwargs
                   ):
         if depth > 0:
-            _modules = [nn.Linear(in_channels, base_channels)] + ([torch.nn.Dropout1d(0.5)] if dropout else []) + \
+            _modules = [nn.Linear(in_channels, base_channels) if not kwargs.get("first_convbn", False) else BaseLinear(in_channels, base_channels, skip = skip, norm = norm)] + ([torch.nn.Dropout1d(0.5)] if dropout else []) + \
                        [*([BaseLinear(base_channels, base_channels, skip = skip, norm = norm)] +  ([torch.nn.Dropout1d(0.5)] if dropout else []))] * depth + \
                        [*([nn.Linear(base_channels, out_channels)] + ([torch.nn.Dropout1d(0.5)] if dropout else []))]
         else:
@@ -335,6 +436,7 @@ class offsetNet(nn.Module):
                 x = self.norm(x, self._min, self._max)
         else:
             x = self.norm(x)
+
         n = x.shape[0]
         if hasattr(self, "pos"):
             x = torch.cat((x, self.pos.repeat(n,1 ,1)), dim = 1)
@@ -345,7 +447,8 @@ class offsetNet(nn.Module):
 
 class offsetNetV2(offsetNet):
 
-    def _build_net(self,
+    def _build_net(
+                   self,
                    in_channels,
                    base_channels,
                    out_channels,
@@ -371,23 +474,40 @@ class offsetNetV2(offsetNet):
         channels = [base_channels * (2 ** i) for i in range(layers)]
         channels = [x if x <= max_channels else max_channels for x in channels]
 
-        _modules = [ 
-                     nn.AdaptiveMaxPool2d(from_size),
-                     nn.Conv2d(in_channels, base_channels, 3, 1, 1)             
-                   ]
+        class BlurModule(nn.Module):
+            def __init__(self, in_channels):
+                super().__init__()
+                self.module_3x3 = nn.Conv2d(in_channels // 2, in_channels // 2, 3, 1, 1, groups = in_channels // 2, bias = False)
+                self.module_5x5 = nn.Conv2d(in_channels // 2, in_channels // 2, 5, 1, 2, groups = in_channels // 2, bias = False)
+                self.module_7x7 = nn.Conv2d(in_channels // 2, in_channels // 2, 7, 1, 3, groups = in_channels // 2, bias = False)
+
+                self.merge = nn.Conv2d(in_channels // 2 * 4 + 1 , in_channels, 1, 1, 0)
+            def forward(self, x):
+                y = x[:,0:1, ...]
+                o_x3 = self.module_3x3(y)
+                o_x5 = self.module_5x5(y)
+                o_x7 = self.module_7x7(y)
+                return self.merge(torch.cat((y, o_x3, o_x5, o_x7, x[:, 1:2, ...]), dim = 1))
+
+        _modules = [
+                    #BlurModule(in_channels),
+                    nn.Conv2d(in_channels,  base_channels, 3, 1, 1, bias = False) if not kwargs.get("first_convbn", False) else BaseConv2d(in_channels, base_channels, 3, 1, 1, act = None)
+                   ] 
 
         in_c = base_channels
         for i in range(layers):
             out_c = channels[i]
-            _modules += [BaseConv2d(in_c, out_c, 3, 2, 1, act = act)]
+            _modules += [BaseConv2d(in_c, out_c, 3, 2, 1, act = act, norm = norm, repeat = depth)]
             in_c = out_c
-
         _modules += [Flatten(), nn.Linear(in_c, out_channels)]
+        if dropout: 
+            _modules += [torch.nn.Dropout1d(0.1)]
+        if remap:
+            _modules += [nn.Linear(out_channels, out_channels)]
         self.net = nn.Sequential(*_modules)
 
     def forward(self, x):
-        
-
+    
         if self.norm_type == '_minmax_constant' or self.norm_type == "_minmax_constant_no_norm" or self.norm_type == "_minmax_constant_no_clip":
             if self.norm_type == "_minmax_constant_no_clip":
                 x = self.norm(x, self._min, self._max, exp_supress)
@@ -395,10 +515,8 @@ class offsetNetV2(offsetNet):
                 x = self.norm(x, self._min, self._max)
         else:
             x = self.norm(x)
-
         y = self.net(x)
         return self.renorm(y)
-
 
 class Dataset:
     def __init__(
@@ -410,7 +528,8 @@ class Dataset:
                  augmentation: bool = False,
                  norm_dim: list = [0, 1],
                  is_abs: bool = False,
-                 is_flow_map: bool = False
+                 is_flow_map: bool = False,
+                 use_point: bool = False
                 ):
 
         assert os.path.exists(attributes_path), f"attribute path {attributes_path} not exist."
@@ -436,31 +555,77 @@ class Dataset:
         landmarks = np.load(ldm_path)
         #assert len(attributes) == len(landmarks), "attributes length unequal with landmarks."
         id_landmark = np.load(id_landmark_path)
-
+        self.augmentation = augmentation
+        if augmentation:
+            ops = []
+            self.ops = ops
+            logger.info([op for op in self.ops])
+        self.is_flow_map = is_flow_map
         if is_flow_map:
-            
+            #landmarks = (landmarks - landmarks.mean(axis = (0, 1), keepdims = True)) / (landmarks.std(axis = (0,1), keepdims = True) + 1e-8)
+            self.offset_range = self.get_offset_range(np.concatenate(((landmarks)[:, 6:11, :], (landmarks)[:, 48:68, :]), axis = 1), norm_dim, is_abs)
             class get_maps:
-                def renorm(self, x):
-                    return 2 * ((x - x.min(axis = 0)) / (x.max(axis = 0) - x.min(axis = 0)) - 0.5)
+                def __init__(
+                              self, 
+                              _type = "polylines", 
+                              min_max: List = None
+                            ):
+
+                    assert _type in ["polylines", "points"]
+                    self.type = _type
+                    self.scale = 54
+                    self.pad = 10
+                    self.min, self.max = min_max
+                    _landmarks = np.concatenate((landmarks[:, 6:11,:], landmarks[:, 48:68,:]), axis = 1)
+                    diff_landmarks = np.zeros_like(_landmarks)
+                    landmarks_renorm = self.renorm(_landmarks, dim = 1)
+                    diff_landmarks[:-1] = landmarks_renorm[1:] - landmarks_renorm[:-1]
+                    #self.op = shift_v3(scale = 2.0, dim = 'x+y', prob = 1.0, diff = diff_landmarks)
+                    self.op = shift_v3(scale = 0.5, dim = 'x+y', prob = 1.0, slice = [5, 25])
+
+                def renorm(self, x, dim = 0):
+                    scale = self.scale
+                    pad = self.pad
+                    return 2 * ((x - x.min(axis = dim, keepdims = True)) / (x.max(axis = dim, keepdims = True) - x.min(axis = dim, keepdims = True)) - 0.5) * scale / 2 + scale / 2 + pad / 2
+
+                def renorm_v2(self, x):
+                    _min, _max = self.min[0], self.max[0]
+                    scale = self.scale
+                    pad = self.pad
+                    return 2 * (np.clip((x - _min) / (_max - _min), 0.0, 1.0) - 0.5) * scale / 2 + scale / 2 + pad / 2
 
                 def __getitem__(self, index):
 
-                    scale = 64
-                    pad = 10
                     _id_landmarks = self.renorm(np.concatenate((id_landmark[0, 6:11,:],id_landmark[0, 48:68,:]), axis = 0))
                     _landmarks = self.renorm(np.concatenate((landmarks[index, 6:11,:],landmarks[index, 48:68,:]), axis = 0))
+                    
+                    if augmentation:
+                        _landmarks = self.op(_landmarks)
 
-                    _id_landmarks = _id_landmarks * scale / 2 + scale / 2 + pad / 2
-                    _landmarks = _landmarks * scale / 2 + scale / 2 + pad / 2
+                    scale = self.scale
+                    pad = self.pad
 
-                    id_map = np.zeros((scale + pad, scale + pad, 3), np.uint8)
-                    cv2.polylines(id_map, [_id_landmarks[0:5,:].astype(np.int32)], False, (255, 255, 255), 2)
-                    cv2.polylines(id_map, [_id_landmarks[5:25,:].astype(np.int32)], True, (255, 255, 255), 2)
+                    id_map = np.zeros((scale + pad, scale + pad, 3), dtype = np.uint8) #(np.random.random((scale + pad, scale + pad, 3)) * 200).astype(np.uint8)
+                    landmark_map = np.zeros((scale + pad, scale + pad, 3), dtype = np.uint8)#(np.random.random((scale + pad , scale + pad, 3)) * 200).astype(np.uint8)
 
-                    landmark_map = np.zeros((scale + pad , scale + pad, 3), np.uint8)
-                    cv2.polylines(landmark_map, [_landmarks[0:5,:].astype(np.int32)], False, (255, 255, 255), 2)
-                    cv2.polylines(landmark_map, [_landmarks[5:25,:].astype(np.int32)], True, (255, 255, 255), 2)
+                    if self.type == "polylines":
+                        cv2.polylines(id_map, [_id_landmarks[0:5,:].astype(np.int32)], False, (255, 255, 255), 1, cv2.LINE_AA)
+                        cv2.polylines(id_map, [_id_landmarks[5:25,:].astype(np.int32)], True, (255, 255, 255), 1, cv2.LINE_AA)
+                        cv2.polylines(landmark_map, [_landmarks[0:5,:].astype(np.int32)], False, (255, 255, 255), 1, cv2.LINE_AA)
+                        cv2.polylines(landmark_map, [_landmarks[5:25,:].astype(np.int32)], True, (255, 255, 255), 1, cv2.LINE_AA)
+                        #landmark_map = cv2.GaussianBlur(landmark_map, (5,5), 0.5)
+
+
+                    elif self.type == "points":
+                        _id_landmarks = _id_landmarks.astype(np.int32)
+                        _landmarks = _landmarks.astype(np.int32)
+                        for (point_i, point) in zip(_id_landmarks, _landmarks):
+                            x_i, y_i = point_i
+                            x, y = point
+                            id_map[y_i, x_i, :] = 255
+                            landmark_map[y, x, :] = 255
                     return ((np.concatenate((landmark_map[..., 0:1], id_map[..., 0:1]), axis = 2) / 255.0 - .5) * 2).transpose((2, 0, 1)) 
+            self.offsets = get_maps(_type = "points" if use_point else "polylines", min_max = self.offset_range)
             """
             class get_maps:
                 def __getitem__(self, index):
@@ -473,9 +638,6 @@ class Dataset:
                     cv2.polylines(landmark_map, [landmarks[index, 48:68,:].astype(np.int32)], True, (255, 255, 255), 2)
                     return ((np.concatenate((landmark_map[..., 0:1], id_map[..., 0:1]), axis = 2) / 255.0 - .5) * 2).transpose((2, 0, 1)) 
             """
-            self.offsets = get_maps()
-            self.offset_range = (0, 255)
-
         else:
             self.offsets = np.concatenate(((landmarks - id_landmark)[:, 48:68, :], (landmarks - id_landmark)[:, 6:11, :]), axis = 1)
             self.offset_range = self.get_offset_range(self.offsets, norm_dim, is_abs)
@@ -486,16 +648,6 @@ class Dataset:
         current_folder = "/data1/wanghaoran/Amemori/ExpressiveVideoStyleGanEncoding/"
         self.gen_files = [os.path.join(current_folder, x) for x in gen_file_list]
 
-        self.augmentation = augmentation
-
-        if augmentation:
-
-            self.ops = [
-                            shift(pixel_range = [-5, 5], dim = 'y', prob = 0.2), 
-                            #affine()
-                       ]
-
-            logger.info([op for op in self.ops])
 
     def __len__(self):
         return self.length
@@ -553,8 +705,8 @@ class Dataset:
             attribute = torch.stack(attributes, dim = 0)
         else:
             attribute = self.attributes[index][:size_of_alpha]
-
-        if self.augmentation:
+        
+        if self.augmentation and not self.is_flow_map:
             for op in self.ops:
                 self.offsets[index] = op(self.offsets[index])
 
@@ -650,6 +802,10 @@ def aligner(
     with open(os.path.join(current_pwd, config_path), encoding = 'utf-8') as f:
         config = edict(yaml.load(f, Loader = yaml.CLoader))
 
+    net_config = config.net
+    name = "offsetNet" if not hasattr(net_config, "name") else net_config.name
+    use_point = False if not hasattr(net_config, "use_point") else net_config.use_point
+
     snapshots = os.path.join(save_path, "snapshots")
     tensorboard_path = os.path.join(save_path, "tensorboard", f"{time.time()}")
     os.makedirs(snapshots, exist_ok = True)
@@ -657,8 +813,13 @@ def aligner(
     device = "cuda:0"
     writer = SummaryWriter(tensorboard_path)
     decoder = StyleSpaceDecoder(stylegan_path).to(device)
+    pti_path = None if not hasattr(config, "pti_path") else config.pti_path
+    if pti_path is not None:
+        decoder.load_state_dict(torch.load(pti_path))
+        logger.info(f" decoder loaded from {pti_path} ")
+
     for p in decoder.parameters():
-        p.requires_grad = True
+        p.requires_grad = False
 
     datasets_list = []
     renorm = "clip" if not hasattr(config.net, "renorm") else config.net.renorm
@@ -673,7 +834,8 @@ def aligner(
                           augmentation = False if not hasattr(dataset_config,"augmentation") else dataset_config.augmentation, \
                           norm_dim = [0, 1] if not hasattr(config.net, "norm_dim") else config.net.norm_dim,
                           is_abs = (config.net.norm_type == "minmax_constant_no_norm"),
-                          is_flow_map = False if not hasattr(dataset_config,"is_flow_map") else dataset_config.is_flow_map
+                          is_flow_map = False if not hasattr(dataset_config,"is_flow_map") else dataset_config.is_flow_map,
+                          use_point = use_point
                         )
         datasets_list.append(dataset)
     
@@ -683,22 +845,20 @@ def aligner(
         offset_range = dataset.offset_range
     dataset = torch.utils.data.ConcatDataset(datasets_list)
     dataloader = DataLoader(dataset, batch_size = config.batchsize, shuffle = True, num_workers = 8)
-
+    training_batchsize = config.batchsize
     dataset_config = config.val
     val_dataset = Dataset(
                            os.path.join(current_pwd, dataset_config.attr_path), 
                            os.path.join(current_pwd,dataset_config.ldm_path), 
                            os.path.join(current_pwd, dataset_config.id_path), 
                            os.path.join(current_pwd, dataset_config.id_landmark_path),
-                           is_flow_map = False if not hasattr(dataset_config,"is_flow_map") else dataset_config.is_flow_map
+                           is_flow_map = False if not hasattr(dataset_config,"is_flow_map") else dataset_config.is_flow_map,
+                           use_point = use_point,
+                           augmentation = False if not hasattr(dataset_config,"augmentation") else dataset_config.augmentation
                          )
     val_dataloader = DataLoader(val_dataset, batch_size = config.batchsize, shuffle = False)
 
     # init net
-    net_config = config.net
-
-    name = "offsetNet" if not hasattr(net_config, "name") else net_config.name
-
     is_refine = False if not hasattr(net_config, "is_refine") else net_config.is_refine
     remap = False if not hasattr(net_config, "remap") else net_config.remap
     use_fourier = False if not hasattr(net_config, "use_fourier") else net_config.use_fourier
@@ -711,7 +871,8 @@ def aligner(
     net = eval(name)(\
                     net_config.in_channels * 2 if name == "offsetNet" else net_config.in_channels, size_of_alpha, \
                     net_config.depth, \
-                    base_channels = 512 if not hasattr(net_config, "base_channels") else net_config.base_channels , \
+                    base_channels = 512 if not hasattr(net_config, "base_channels") else net_config.base_channels , 
+                    max_channels = 128 if not hasattr(net_config, "max_channels") else net_config.max_channels , \
                     dropout = False if not hasattr(net_config, "dropout") else net_config.dropout, \
                     norm = "BatchNorm1d" if not hasattr(net_config, "norm") else net_config.norm, \
                     skip = False if not hasattr(net_config, "skip") else net_config.skip, \
@@ -725,8 +886,9 @@ def aligner(
                     use_fourier = use_fourier,
                     pos = pos,
                     from_size = 512 if not hasattr(net_config, "from_size") else net_config.from_size,
-                    act = "ReLU" if not hasattr(net_config, "act") else net_config.act
-                   ) 
+                    act = "ReLU" if not hasattr(net_config, "act") else net_config.act,
+                    first_convbn = False if not hasattr(net_config, "first_convbn") else net_config.first_convbn
+                   )
     logger.info(net)
     best_nme = 100.0
     best_acc = 0.0
@@ -740,6 +902,7 @@ def aligner(
                 best_nme = state_dict['best_value']
             logger.info(f"load weight and nme : {best_nme}")
         net.load_state_dict(weight, False)
+    net.train()
     net.set_clip(clip_values)
     if renorm == "znorm":
         net.set_z_attr(values)
@@ -749,35 +912,61 @@ def aligner(
         p.requires_grad = True
 
     optimizer = torch.optim.AdamW(net.parameters(), lr = net_config.lr) #Adam(net.parameters(), lr = net_config.lr)
-    sche = torch.optim.lr_scheduler.StepLR(optimizer, config.optim.step, gamma = config.optim.gamma)
+    sche_name = "StepLR" if not hasattr(config.optim,"sche") else config.optim.sche
+    sche = getattr(torch.optim.lr_scheduler, sche_name)
+    if sche_name == "StepLR":
+        sche = sche(optimizer, config.optim.step, gamma = config.optim.gamma)
+    else:
+        sche = sche(optimizer, base_lr = config.optim.base_lr, max_lr = config.optim.max_lr, step_size_up = config.optim.step, cycle_momentum=False)
     loss_d = torch.nn.CosineSimilarity(dim = 1)
-    loss_i =  torch.nn.L1Loss() #SmoothL1LossMyself() #torch.nn.MSELoss()
+    loss_i = torch.nn.L1Loss() #SmoothL1LossMyself() #torch.nn.MSELoss()
 
     start_epoch = 1 if not hasattr(config, "start_epoch") else config.start_epoch
     pbar = tqdm(range(start_epoch, config.epochs + start_epoch))
     total_count = 0
     last_path = None
+
+
+    #weights = []
+    #for (k, i) in alphas[0:8]:
+    #    for _i in i:
+    #        weight = decoder.get_conv_weight(k, _i).reshape(1, 1, -1) 
+    #        weight = (weight.square().sum(dim = [2]) + 1e-8).rsqrt().reshape(1,1)
+    #        weights.append(weight)
+
+    scaler = torch.cuda.amp.GradScaler()
     for epoch in pbar:
         for idx, data in enumerate(dataloader):
-            attr, offset = data
-            attr = attr.to(device)
-            offset = offset.to(device)
-            d_loss_value = 0.0
-            pred_attr = net(offset)
-            attr = ((attr - net.clip_values[:, 0]) / (net.clip_values[:, 1] - net.clip_values[:, 0]))
-            pred_attr = (pred_attr - net.clip_values[:,0]) / (net.clip_values[:,1] - net.clip_values[:,0])
+            with torch.autocast(device_type = "cuda", dtype = torch.float16):
+                optimizer.zero_grad()
+                attr, offset = data
+                attr = attr.to(device)
+                n = attr.shape[0]
+                offset = offset.to(device)
+                d_loss_value = 0.0
+                pred_attr = net(offset)
+                #weight_loss_value = 0
+                #for weight in weights:
+                #    weight = weight.repeat(n, 1, 1)
+                #    weight_loss_value += loss_i(weight * attr.reshape(n, -1, 1), weight * pred_attr.reshape(n, -1, 1))
+                attr = ((attr - net.clip_values[:, 0]) / (net.clip_values[:, 1] - net.clip_values[:, 0]))
+                pred_attr = (pred_attr - net.clip_values[:,0]) / (net.clip_values[:,1] - net.clip_values[:,0])
 
-            d_loss_value = 1 - loss_d(pred_attr, attr).mean() 
-            i_loss_value = loss_i(attr, pred_attr)
+                d_loss_value = 1 - loss_d(pred_attr, attr).mean() 
+                i_loss_value = loss_i(attr, pred_attr)
 
-            loss_value = i_loss_value * 1.0 + d_loss_value * 5.0
-            loss_value.backward()
-            optimizer.step()
+                weight_loss_value = 0
+                loss_value = i_loss_value * 1.0 + d_loss_value * 0.0 + weight_loss_value * 1.0
+                scaler.scale(loss_value).backward()
+                scaler.step(optimizer)
+                scaler.update()
             total_count += 1
 
             if idx % config.show_internal == 0:
+                #logger.info(f"epoch:{epoch}: {idx+1}/{len(dataloader)} loss {loss_value.mean().item()}, d_loss {d_loss_value.mean().item()} i_loss {i_loss_value.mean().item()} weight_loss {weight_loss_value.mean().item()} ")
                 logger.info(f"epoch:{epoch}: {idx+1}/{len(dataloader)} loss {loss_value.mean().item()}, d_loss {d_loss_value.mean().item()} i_loss {i_loss_value.mean().item()} ")
                 writer.add_scalar("loss", loss_value.mean().item(), total_count)
+                writer.add_image(f'image', make_grid(offset[:, 0:1, ...].detach(),normalize=True, scale_each=True), epoch)
 
         nme_value = 0.0
         acc_value = 0.0
@@ -799,7 +988,8 @@ def aligner(
             pred_attr = (pred_attr - net.clip_values[:,0]) / (net.clip_values[:,1] - net.clip_values[:,0])
 
             nme_value += torch.nn.functional.mse_loss(attr, pred_attr).mean()
-            sim_value += torch.nn.functional.cosine_similarity(pred_attr, attr).mean()
+            sim_value += torch.nn.functional.cosine_similarity(attr, pred_attr).mean()
+
         nme_value /= len(val_dataloader)
         acc_value /= len(val_dataloader)
         sim_value /= len(val_dataloader)
@@ -847,6 +1037,8 @@ def sync_lip_validate(
     assert save_path.endswith('mp4'), "expected postfix mp4, but got is {save_path}."
 
     device = "cuda:0"
+
+    exp_name = os.path.dirname(config_path).split('/')[-1]
     with open(config_path) as f:
         config = edict(yaml.load(f, Loader = yaml.CLoader))
 
@@ -854,11 +1046,14 @@ def sync_lip_validate(
     renorm = "clip" if not hasattr(net_config, "renorm") else net_config.renorm
     remap = False if not hasattr(net_config, "remap") else net_config.remap
     use_fourier = False if not hasattr(net_config, "use_fourier") else net_config.use_fourier
+    use_point = False if not hasattr(net_config, "use_point") else net_config.use_point
+
     name = "offsetNet" if not hasattr(net_config, "name") else net_config.name
     net = eval(name)(\
                     net_config.in_channels * 2 if name == "offsetNet" else net_config.in_channels, size_of_alpha, \
                     net_config.depth, \
                     base_channels = 512 if not hasattr(net_config, "base_channels") else net_config.base_channels , \
+                    max_channels = 128 if not hasattr(net_config, "max_channels") else net_config.max_channels , \
                     dropout = False if not hasattr(net_config, "dropout") else net_config.dropout, \
                     norm = "BatchNorm1d" if not hasattr(net_config, "norm") else net_config.norm, \
                     skip = False if not hasattr(net_config, "skip") else net_config.skip, \
@@ -868,8 +1063,8 @@ def sync_lip_validate(
                     remap = remap,
                     use_fourier = use_fourier,
                     from_size = 512 if not hasattr(net_config, "from_size") else net_config.from_size,
-                    act = "ReLU" if not hasattr(net_config, "act") else net_config.act
-                   )
+                    act = "ReLU" if not hasattr(net_config, "act") else net_config.act,
+                    first_convbn = False if not hasattr(net_config, "first_convbn") else net_config.first_convbn)
     net.to(device)
     state_dict = torch.load(offset_weight_path)
     weight = state_dict
@@ -879,7 +1074,6 @@ def sync_lip_validate(
         logger.info(f"load weight and nme : {best_nme}")
     net.load_state_dict(weight, False)
     net.eval()
-
     resolution = kwargs.get("resolution", 1024)
     decoder = StyleSpaceDecoder(stylegan_path, to_resolution = resolution)
     decoder.load_state_dict(torch.load(pti_weight_path), False)
@@ -898,7 +1092,8 @@ def sync_lip_validate(
 
     if isinstance(landmarks, str):
         landmarks = np.load(landmarks)[...,:2]
-
+    #landmarks[..., 1] = 512 - landmarks[..., 1]
+    #landmarks = gaussian_filter1d(landmarks, sigma=2.0, axis=0)
     # hard code id video landmarks.
     id_landmarks = np.load(os.path.join(current_pwd, config.val.id_landmark_path))
 
@@ -917,13 +1112,14 @@ def sync_lip_validate(
     shift_empty[minus, 0] = shift_y[minus, :].min(axis = 1)
     shift_y = shift_empty
 
-    landmarks[:,:,1] = landmarks[:,:,1] - shift_y.reshape(-1, 1)
-    
-
+    #landmarks[:,:,1] = landmarks[:,:,1] - shift_y.reshape(-1, 1)
+    landmarks = np.concatenate((landmarks[:, 6:11,:],landmarks[:, 48:68,:]), axis = 1)
+    id_landmarks = np.concatenate((id_landmarks[:, 6:11,:],id_landmarks[:, 48:68,:]), axis = 1)
+    #landmarks = (landmarks - landmarks.mean(axis = (0, 1), keepdims = True)) / (landmarks.std(axis = (0,1), keepdims = True) + 1e-8)
     if net_config.in_channels == 25:
-        landmark_offsets = np.concatenate(((landmarks - id_landmarks)[:, 48:68, :], (landmarks - id_landmarks)[:, 6:11, :]), axis = 1) #landmarks - id_landmarks #np.concatenate(((landmarks - id_landmarks)[:, 48:68, :], (landmarks - id_landmarks)[:, 6:11, :]), axis = 1)
+        landmark_offsets = landmarks - id_landmarks
     else:
-        landmark_offsets = (landmarks - id_landmarks)[:, 48:68, :]
+        landmark_offsets = (landmarks - id_landmarks)[:, 5:25, :]
 
     driving_files = None
     if driving_images_dir is not None:
@@ -934,7 +1130,11 @@ def sync_lip_validate(
     frames = kwargs.get("frames", -1)
     n = min(landmark_offsets.shape[0], len(attributes)) if frames == -1 else frames
     t = Timer()
-    p_bar = tqdm.tqdm(range(n))
+
+    batch_size = 8
+    bundle_datasets = [i for i in range(0, n, batch_size)]
+
+    p_bar = tqdm.tqdm(bundle_datasets)
     detector = get_detector()
     face_parse_func = face_parsing()
 
@@ -955,83 +1155,258 @@ def sync_lip_validate(
                 return self.pose[i]
 
     class get_maps:
-        def renorm(self, x):
-            return 2 * ((x - x.min(axis = 0)) / (x.max(axis = 0) - x.min(axis = 0)) - 0.5)
+        
+        def __init__(
+                     self, 
+                     _type = "polylines",
+                     min_max: List = None
+                    ):
+
+            assert _type in ["polylines", "points"]
+            self.type = _type
+            self.min, self.max = min_max
+
+        def renorm(self, x, scale, pad):
+            return 2 * ((x - x.min(axis = 0)) / (x.max(axis = 0) - x.min(axis = 0)) - 0.5) * scale / 2 + scale / 2 + pad / 2
+
+        def renorm_v2(self, x, scale, pad):
+            _min, _max = self.min[0], self.max[0]
+            return 2 * (np.clip((x - _min) / (_max - _min), 0.0, 1.0) - 0.5) * scale / 2 + scale / 2 + pad / 2
 
         def __getitem__(self, index):
 
-            scale = 64
+            scale = 54
             pad = 10
-            _id_landmarks = self.renorm(np.concatenate((id_landmarks[0, 6:11,:],id_landmarks[0, 48:68,:]), axis = 0))
-            _landmarks = self.renorm(np.concatenate((landmarks[index, 6:11,:],landmarks[index, 48:68,:]), axis = 0))
+            _id_landmarks = self.renorm(id_landmarks[0], scale, pad)
+            _landmarks = self.renorm(landmarks[index], scale, pad)
 
-            _id_landmarks = _id_landmarks * scale / 2 + scale / 2 + pad / 2
-            _landmarks = _landmarks * scale / 2 + scale / 2 + pad / 2
+            id_map = np.zeros((scale + pad, scale + pad, 3), dtype = np.uint8) #(np.random.random((scale + pad, scale + pad, 3)) * 200).astype(np.uint8)
+            landmark_map = np.zeros((scale + pad , scale + pad, 3), dtype = np.uint8)
 
-            id_map = np.zeros((scale + pad, scale + pad, 3), np.uint8)
-            cv2.polylines(id_map, [_id_landmarks[0:5,:].astype(np.int32)], False, (255, 255, 255), 2)
-            cv2.polylines(id_map, [_id_landmarks[5:25,:].astype(np.int32)], True, (255, 255, 255), 2)
-
-            landmark_map = np.zeros((scale + pad , scale + pad, 3), np.uint8)
-            cv2.polylines(landmark_map, [_landmarks[0:5,:].astype(np.int32)], False, (255, 255, 255), 2)
-            cv2.polylines(landmark_map, [_landmarks[5:25,:].astype(np.int32)], True, (255, 255, 255), 2)
+            if self.type == "polylines":
+                cv2.polylines(id_map, [_id_landmarks[0:5,:].astype(np.int32)], False, (255, 255, 255), 1, cv2.LINE_AA)
+                cv2.polylines(id_map, [_id_landmarks[5:25,:].astype(np.int32)], True, (255, 255, 255), 1, cv2.LINE_AA)
+                cv2.polylines(landmark_map, [_landmarks[0:5,:].astype(np.int32)], False, (255, 255, 255), 1, cv2.LINE_AA)
+                cv2.polylines(landmark_map, [_landmarks[5:25,:].astype(np.int32)], True, (255, 255, 255), 1, cv2.LINE_AA)
+                #landmark_map = cv2.GaussianBlur(landmark_map, (5,5), 0.5)
+            elif self.type == "points":
+                _id_landmarks = _id_landmarks.astype(np.int32)
+                _landmarks = _landmarks.astype(np.int32)
+                for (point_i, point) in zip(_id_landmarks, _landmarks):
+                    x_i, y_i = point_i
+                    x, y = point
+                    id_map[y_i, x_i, :] = 255
+                    landmark_map[y, x, :] = 255
+            cv2.imwrite(os.path.join(current_pwd, f"results/maps/{index + 1}.jpg"), landmark_map)
             return ((np.concatenate((landmark_map[..., 0:1], id_map[..., 0:1]), axis = 2) / 255.0 - .5) * 2).transpose((2, 0, 1)) 
      
     if name == "offsetNetV2":
-        landmark_offsets = get_maps()
+        landmark_offsets = get_maps(_type = "points" if use_point else "polylines", min_max = [net._min.cpu().numpy(), net._max.cpu().numpy()])
     get_pose_func = get_pose(pose_latent_path)
+    psnr_value = 0.0
+    psnr_values = []
+
+    exclude = [
+                0,
+                11,
+                48,
+                61,
+                98,
+                111,
+                123,
+                136,
+                148,
+                161,
+                174,
+                186,
+                211,
+                248,
+                273,
+                286,
+                311,
+                361,
+                373,
+                386,
+                436,
+                448,
+                461,
+                473,
+                511,
+                523,
+                536,
+                548,
+                561,
+                573,
+                586,
+                611,
+                623,
+                636,
+                648,
+                661,
+                686,
+                698,
+                711,
+                723,
+                786,
+                798,
+                811,
+                823,
+                836,
+                848,
+                861,
+                873,
+                886,
+                898,
+                912,
+                924,
+                961,
+                1011,
+                1073,
+                1161,
+                1173,
+                1186,
+                1211,
+                1223,
+                1236,
+                1248,
+                1273,
+                1373,
+                1473,
+                1511,
+                1523,
+                1536,
+                1573,
+                1586,
+                1598,
+                1661,
+                1673,
+                1686,
+                1698,
+                1711,
+                1736,
+                1760,
+                1773,
+                1811,
+                1823,
+                1886,
+                1973
+              ]
+    
     with imageio.get_writer(save_path, fps = 25) as writer:
-        for i in p_bar:
-            attribute = attributes[i]
-            w_plus_with_pose = get_pose_func(i) #torch.load(os.path.join(pose_latent_path, f'{i + 1}.pt'))
+        batch_size = 8
+
+        w_plus_with_pose = get_pose_func(0) #torch.load(os.path.join(pose_latent_path, f'{i + 1}.pt'))
+        style_space_latent = decoder.get_style_space(w_plus_with_pose)
+        q = queue.Queue()
+        q2 = queue.Queue()
+
+        psnr_values = []
+        psnr_value = 0.0
+        output_queue = []
+
+        lock = threading.Lock()
+
+        def kernel():
+            j = q.get()
+            attribute = attributes[j]
+            w_plus_with_pose = get_pose_func(j) #torch.load(os.path.join(pose_latent_path, f'{i + 1}.pt'))
             style_space_latent = decoder.get_style_space(w_plus_with_pose)
-            landmark_offset_np = landmark_offsets[i]
-            landmark_offset = torch.from_numpy(landmark_offset_np).unsqueeze(0).float().to(device)
-            with torch.no_grad():
-                offset = net(landmark_offset)
+            landmark_offset_np = landmark_offsets[j]
+            landmark_offset[j % batch_size] = torch.from_numpy(landmark_offset_np).unsqueeze(0).float().to(device) 
+            region_ss = update_region_offset(style_space_latent, torch.tensor(attribute[1][size_of_alpha:]).reshape(1, -1).to(device), [8, len(alphas)])
+            for index, _  in enumerate(ss_updated):
+                ss_updated[index][j % batch_size, ...] = region_ss[index]
 
-            #ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1]).reshape(1, -1).to(device), [0, len(alphas)])
-            ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1][size_of_alpha:]).reshape(1, -1).to(device), [8, len(alphas)])
-            ss_updated = update_lip_region_offset(ss_updated, offset)
-
-            #ss_updated_cpu = [x.detach().cpu().numpy() for x in ss_updated]
-            #output = decoder(ss_updated_cpu)
-            """
-            target_path = os.path.join(current_pwd, "./pivot")
-            os.makedirs(target_path, exist_ok = True)
-            torch.save([x.detach().cpu().numpy() for x in ss_updated], os.path.join(target_path, f"{i + 1}.pt"))
-            """
-
-            output = np.clip(from_tensor(decoder(ss_updated) * 0.5 + 0.5) * 255.0, 0.0, 255.0)
+        def kernel2():
+                
+            j = q2.get()
+            output = from_tensor(outputs[ j  % batch_size ])
             h,w = output.shape[:2]
-
-            if 0:
-                # facial core latent.
-                output_core_latent = np.clip(from_tensor(decoder(style_space_latent) * 0.5 + 0.5) * 255.0, 0.0, 255.0)
-                output = np.concatenate((output, output_core_latent), axis = 0)
-
-                # facial reenactment.
-                ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1]).reshape(1, -1).to(device), [0, len(alphas)])
-                output_reenactment = np.clip(from_tensor(decoder(ss_updated) * 0.5 + 0.5) * 255.0, 0.0, 255.0)
-                output = np.concatenate((output, output_reenactment), axis = 0)
-
             if driving_files is not None:
-                try:
-                    image = cv2.imread(driving_files[i])[...,::-1]
-                except Exception as e:
-                    break
+                landmark_offset_np = landmark_offsets[j]
+                image = cv2.imread(driving_files[j])[...,::-1]
                 w = h = 512
                 image = cv2.resize(image, (w,h))
                 output = cv2.resize(output, (w,h))
                 mask = face_parse_func(image)
                 blender = kwargs.get("blender", None)
                 output = merge_from_two_image(image, output, mask = mask, blender = blender)
-                #landmark = landmarks[i, ...]
-                #image = draw_multiple_landmarks([landmark ,id_landmarks[0]])
-                image_landmark = cv2.resize((landmark_offset_np[0:1, :, :].repeat(3, axis = 0).transpose((1,2,0)) * 0.5 + 0.5) * 255, (w,h))
-                output = np.concatenate((output, image, image_landmark), axis = 0)
+                
+                if j in exclude:
+                    merge_mask = np.zeros_like(output)
+                    for (y1,y2, x1, x2) in output_copy_region:
+                        merge_mask[y1:y2, x1:x2, ...] = 1.0
+                    value = psnr_func_np(image * merge_mask, output * merge_mask)
+                    #psnr_value = psnr_value +  value
+                    psnr_values.append(value)
 
-            writer.append_data(np.uint8(output))
+                if name != "offsetNetV2":
+                    landmark = landmarks[j, ...]
+                    image_landmark = draw_multiple_landmarks([landmark ,id_landmarks[0]])
+                else:
+                    image_landmark = cv2.resize((landmark_offset_np[0:1, :, :].repeat(3, axis = 0).transpose((1,2,0)) * 0.5 + 0.5) * 255, (w,h))
+                output = np.concatenate((output, image, image_landmark), axis = 0)
+            output_queue[j % batch_size] = output
+
+
+
+        for i in p_bar:
+            end = min(i + batch_size, n)
+            size = end - i
+            landmark_offset = torch.zeros((size, 2, 64, 64)).to(device)
+            ss_updated = [torch.zeros_like(x).repeat(size, 1).to(device) for x in style_space_latent]
+            [q.put(j) for j in range(i, end)]
+            output_queue = [None for _ in range(size)]
+            workers = [threading.Thread(target = kernel, args = ()) for j in range(batch_size)]
+            for worker in workers:
+                worker.start()
+
+            for worker in workers:
+                worker.join()
+            #for j in range(i, end):
+            #if i not in exclude:
+            #    continue
+            
+            with torch.no_grad():
+                offset = net(landmark_offset)
+            ss_updated = update_lip_region_offset(ss_updated, offset)
+            outputs = torch.clip((decoder(ss_updated) * 0.5 + 0.5) * 255.0, 0.0, 255.0)
+            [q2.put(j) for j in range(i, end)]
+            workers_out = [threading.Thread(target = kernel2, args = ()) for j in range(batch_size)]
+            for worker in workers_out:
+                worker.start()
+            for worker in workers_out:
+                worker.join()
+            for index, output in enumerate(output_queue):
+                #j = index + i
+                #if j in exclude:
+                writer.append_data(np.uint8(output))
+
+        psnr_list = np.array(psnr_values)
+        n = len(exclude)
+        with open("psnr.txt", 'a+') as f:
+            f.write(f"[{exp_name}] psnr : {psnr_list.mean()}, min: {psnr_list.min()}, max: {psnr_list.max()} \n")
+
+        blank = " " * 8
+        with open("psnr_total.txt", "r+") as f:
+            lines = f.readlines()
+            if len(lines):
+                f.seek(0, 0)
+                line = lines[0].strip() + blank + f"{exp_name}\n"  
+                f.write(line)
+                blank = " " * 4
+                for line, value in zip(lines[1:], psnr_values):
+                    line = line.strip()
+                    line = line + blank + str(round(value, 3)) + "\n"
+                    f.write(line)
+            else:
+                f.write(f"pic_id" + blank + f"{exp_name}\n")
+                blank = " " * 4
+                for index, value in zip(exclude, psnr_values):
+                    line = f"{index}" + blank + str(round(value, 3)) + "\n"
+                    f.write(line)
+
+        logger.info(f"psnr : {psnr_value / n}, min: {psnr_list.min()}, max: {psnr_list.max()}")
 
 def evaluate(
              config_path: str,
@@ -1055,6 +1430,7 @@ def evaluate(
                     net_config.in_channels * 2 if name == "offsetNet" else net_config.in_channels, size_of_alpha, \
                     net_config.depth, \
                     base_channels = 512 if not hasattr(net_config, "base_channels") else net_config.base_channels , \
+                    max_channels = 128 if not hasattr(net_config, "max_channels") else net_config.max_channels , \
                     dropout = False if not hasattr(net_config, "dropout") else net_config.dropout, \
                     norm = "BatchNorm1d" if not hasattr(net_config, "norm") else net_config.norm, \
                     skip = False if not hasattr(net_config, "skip") else net_config.skip, \
@@ -1063,7 +1439,8 @@ def evaluate(
                     remap = remap,
                     use_fourier = use_fourier,
                     from_size = 512 if not hasattr(net_config, "from_size") else net_config.from_size,
-                    act = "ReLU" if not hasattr(net_config, "act") else net_config.act
+                    act = "ReLU" if not hasattr(net_config, "act") else net_config.act,
+                    first_convbn = False if not hasattr(net_config, "fist_convbn") else net_config.first_convbn
                    )
 
     net.to(device)
@@ -1099,6 +1476,7 @@ def evaluate(
     val_dataloader = DataLoader(val_dataset, batch_size = 8, shuffle = False)
     pbar = tqdm.tqdm(val_dataloader)
     psnr_value = 0.0
+    psnr_list = []
     for idy, data in enumerate(pbar):
         attr, offset = data
         attr = attr.to(device)
@@ -1117,8 +1495,15 @@ def evaluate(
             ss_updated_gt = update_lip_region_offset(ss_updated, attr, version = 'v2')
             image = decoder(ss_updated_pred)
             image_gt = decoder(ss_updated_gt)
-        psnr_value += psnr_func(image, image_gt).mean()
+        cur_psnr = psnr_func(image, image_gt)
+        psnr_list += [x.mean().item() for x in cur_psnr[:]]
+        psnr_value += cur_psnr.mean().item()#psnr_func(image, image_gt).mean().item()
 
     psnr_value /= len(val_dataloader)
+    psnr_list = np.array(psnr_list)
     logger.info(psnr_value)
+    logger.info(psnr_list)
+    
+    return psnr_list
+
 
