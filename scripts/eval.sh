@@ -7,7 +7,7 @@ expname=$1
 # 
 #
 
-CUDA_VISIBLE_DEVICES=6 \
+CUDA_VISIBLE_DEVICES=4 \
 python validate.py \
        --config_path  `pwd`/scripts/${expname}/config.yaml \
        --offset_weight_path `pwd`/results/${expname}/snapshots/best.pth \

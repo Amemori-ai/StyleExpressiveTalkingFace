@@ -920,7 +920,7 @@ def aligner(
     else:
         sche = sche(optimizer, base_lr = config.optim.base_lr, max_lr = config.optim.max_lr, step_size_up = config.optim.step, cycle_momentum=False)
     loss_d = torch.nn.CosineSimilarity(dim = 1)
-    loss_i = L1LossMyself() #torch.nn.MSELoss()
+    loss_i = torch.nn.L1Loss() #torch.nn.MSELoss()
     loss_image = torch.nn.L1Loss()
 
     start_epoch = 1 if not hasattr(config, "start_epoch") else config.start_epoch
@@ -936,7 +936,7 @@ def aligner(
 
     for epoch in pbar:
         for idx, data in enumerate(dataloader):
-
+            optimizer.zero_grad()
             attr, offset = data
             attr = attr.to(device)
             offset = offset.to(device)
@@ -949,16 +949,17 @@ def aligner(
             ss_updated_pred = update_lip_region_offset(ss_updated, pred_attr, version = 'v2')
             ss_updated_gt = update_lip_region_offset(ss_updated, attr, version = 'v2')
             image = decoder(ss_updated_pred)
-            image_gt = decoder(ss_updated_gt)
+            with torch.no_grad():
+                image_gt = decoder(ss_updated_gt)
 
             attr = (attr - net.clip_values[:, 0]) / (net.clip_values[:, 1] - net.clip_values[:, 0])
             pred_attr = (pred_attr - net.clip_values[:, 0]) / (net.clip_values[:, 1] - net.clip_values[:, 0])
 
             image_loss_value = loss_image(image, image_gt)
-            #d_loss_value = 1 - loss_d(pred_attr, attr).mean() 
+            d_loss_value = 1 - loss_d(pred_attr, attr).mean() 
             i_loss_value = loss_i(attr, pred_attr)
 
-            loss_value = i_loss_value * 1.0 + d_loss_value * 5.0 + image_loss_value * 1.0
+            loss_value = i_loss_value * 1.0 + d_loss_value * 0.0 + image_loss_value * 1.0
             loss_value.backward()
             optimizer.step()
             total_count += 1
@@ -966,13 +967,12 @@ def aligner(
             if idx % config.show_internal == 0:
                 logger.info(f"epoch:{epoch}: {idx+1}/{len(dataloader)} loss {loss_value.mean().item()}, image_loss {image_loss_value.mean().item()} i_loss {i_loss_value.mean().item()} ")
                 writer.add_scalar("loss", loss_value.mean().item(), total_count)
-                #images_in_training = torch.cat((image, image_gt), dim =2)
-                #writer.add_image(f'image', make_grid(images_in_training.detach(),normalize=True, scale_each=True), total_count)
+                images_in_training = torch.cat((image, image_gt), dim =2)
+                writer.add_image(f'image', make_grid(images_in_training.detach(),normalize=True, scale_each=True), total_count)
         psnr_value = 0.0
         nme_value = 0.0
         acc_value = 0.0
         sim_value = 0.0
-        """
         # validate 
         net.eval()
         for idy, data in enumerate(val_dataloader):
@@ -991,8 +991,9 @@ def aligner(
             ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1][size_of_alpha:]).reshape(1, -1).to(device).repeat(n, 1), [8, len(alphas)])
             ss_updated_pred = update_lip_region_offset(ss_updated, pred_attr, version = 'v2')
             ss_updated_gt = update_lip_region_offset(ss_updated, attr, version = 'v2')
-            image = decoder(ss_updated_pred)
-            image_gt = decoder(ss_updated_gt)
+            with torch.no_grad():
+                image = decoder(ss_updated_pred)
+                image_gt = decoder(ss_updated_gt)
             #pred_attr = (pred_attr * (net.clip_values[:, 1] - net.clip_values[:, 0])) + net.clip_values[:, 0]
             acc_value += (torch.sign(pred_attr) == torch.sign(attr)).to(torch.float32).mean()
             attr = (attr - net.clip_values[:, 0]) / (net.clip_values[:, 1] - net.clip_values[:, 0])
@@ -1016,11 +1017,11 @@ def aligner(
         writer.add_scalar("nme", nme_value ,global_step = epoch)
         writer.add_scalar("psnr", psnr_value ,global_step = epoch)
         net.train()
-        """
         last_path =  os.path.join(snapshots, "best.pth")
-        best_psnr = psnr_value
-        torch.save(dict(weight = net.state_dict(), best_value = best_psnr, epoch = epoch), last_path)
-        logger.info(f"{epoch} weight saved.")
+        if best_psnr < psnr_value:
+            best_psnr = psnr_value
+            torch.save(dict(weight = net.state_dict(), best_value = best_psnr, epoch = epoch), last_path)
+            logger.info(f"{epoch} weight saved.")
         sche.step()
         writer.add_scalar("learning rate", optimizer.param_groups[0]['lr'] ,global_step = epoch)
     return last_path
@@ -1347,7 +1348,6 @@ def sync_lip_validate(
                 mask = face_parse_func(image)
                 blender = kwargs.get("blender", None)
                 output = merge_from_two_image(image, output, mask = mask, blender = blender)
-                
                 if j in exclude:
                     merge_mask = np.zeros_like(output)
                     for (y1,y2, x1, x2) in output_copy_region:

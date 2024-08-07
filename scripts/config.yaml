@@ -15,18 +15,8 @@ landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/la
 
 #landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_PMJ.npy"
 net:
-<<<<<<< HEAD
-<<<<<<< HEAD
-    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp103/config.yaml"
-    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp103/snapshots/best.pth"
-=======
-    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp151/config.yaml"
-    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp151/snapshots/best.pth"
->>>>>>> 277d3ed6df93c34dc33e590afa2694ecffb3eecf
-=======
-    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp236/config.yaml"
-    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp236/snapshots/best.pth"
->>>>>>> master
+    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp237/config.yaml"
+    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp237/snapshots/best.pth"
     #weight: "/data1/chenlong/local_code/StyleExpressiveTalkingFace-master/results/man3_s0_20240118_set/snapshots/best.pth"
 pti:
     weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pivot_053/snapshots/"
@@ -67,12 +57,8 @@ driving_images_dir: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/Talkin
 #driving_images_dir: "/data1/chenlong/0517/video/0522/2/results/man3_chenl_0521/data/smooth"
 #driving_images_dir: "/data1/Dataset/DingZhi/s3_data/amemori-digital-human-autopipe/training_data/online_model/man3_s0_20240118/dataset/train/smooth/1"
 resolution: 512
-<<<<<<< HEAD
-frames: 100
-=======
 frames: -1
 supress: exp
->>>>>>> 277d3ed6df93c34dc33e590afa2694ecffb3eecf
 
 
 #/data1/chenlong/local_code/StyleExpressiveTalkingFace-master/dataset/man3_s0_20240118_set
