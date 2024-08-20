@@ -11,3 +11,4 @@ onnxruntime
 kornia
 scikit-learn
 numpy<2.0.0
+tensorboardX

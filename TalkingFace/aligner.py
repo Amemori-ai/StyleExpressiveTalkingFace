@@ -43,6 +43,8 @@ from .module import BaseLinear, BaseConv2d, Flatten
 from .equivalent_offset import fused_offsetNet
 from ExpressiveEncoding.loss.FaceParsing.model import BiSeNet
 
+from .extra import exclude
+
 psnr_func = lambda x,y: 20 * torch.log10(1.0 / torch.sqrt(torch.mean((x - y) ** 2)))
 psnr_func_np = lambda x,y: 20 * np.log10(255.0 / np.sqrt(np.mean((x - y) ** 2)))
 #norm = lambda x: x
@@ -469,7 +471,7 @@ class offsetNetV2(offsetNet):
 
         self.from_size = from_size
 
-        layers = int(LOG2(from_size))
+        layers = int(LOG2(from_size)) - int(LOG2(target_size))
 
         channels = [base_channels * (2 ** i) for i in range(layers)]
         channels = [x if x <= max_channels else max_channels for x in channels]
@@ -491,7 +493,7 @@ class offsetNetV2(offsetNet):
 
         _modules = [
                     #BlurModule(in_channels),
-                    nn.Conv2d(in_channels,  base_channels, 3, 1, 1, bias = False) if not kwargs.get("first_convbn", False) else BaseConv2d(in_channels, base_channels, 3, 1, 1, act = None)
+                    nn.Conv2d(in_channels,  base_channels, 3, 1, 1, bias = False) if not kwargs.get("first_convbn", False) else BaseConv2d(in_channels, base_channels, 3, 1, 1, act = None, bias = False)
                    ] 
 
         in_c = base_channels
@@ -499,11 +501,13 @@ class offsetNetV2(offsetNet):
             out_c = channels[i]
             _modules += [BaseConv2d(in_c, out_c, 3, 2, 1, act = act, norm = norm, repeat = depth)]
             in_c = out_c
-        _modules += [Flatten(), nn.Linear(in_c, out_channels)]
+        _modules += [Flatten()]
+        if remap:
+            _modules += [nn.Linear(in_c * (target_size ** 2), in_c), nn.Linear(in_c, in_c), nn.Linear(in_c, out_channels)]
+        else:
+            _modules += [nn.Linear(in_c, out_channels)]
         if dropout: 
             _modules += [torch.nn.Dropout1d(0.1)]
-        if remap:
-            _modules += [nn.Linear(out_channels, out_channels)]
         self.net = nn.Sequential(*_modules)
 
     def forward(self, x):
@@ -537,7 +541,7 @@ class Dataset:
 
         gen_file_list, selected_id_image, selected_id_latent, selected_id = torch.load(id_path)
 
-        self.attributes = torch.load(attributes_path)
+        self.attributes = torch.load(attributes_path, map_location = "cpu")
         # convert to cpu and requires_grad False.
         for i, attr in enumerate(self.attributes):
             if isinstance(attr, list):
@@ -573,15 +577,15 @@ class Dataset:
 
                     assert _type in ["polylines", "points"]
                     self.type = _type
-                    self.scale = 54
-                    self.pad = 10
+                    self.scale = 64
+                    self.pad = 0
                     self.min, self.max = min_max
                     _landmarks = np.concatenate((landmarks[:, 6:11,:], landmarks[:, 48:68,:]), axis = 1)
                     diff_landmarks = np.zeros_like(_landmarks)
                     landmarks_renorm = self.renorm(_landmarks, dim = 1)
                     diff_landmarks[:-1] = landmarks_renorm[1:] - landmarks_renorm[:-1]
                     #self.op = shift_v3(scale = 2.0, dim = 'x+y', prob = 1.0, diff = diff_landmarks)
-                    self.op = shift_v3(scale = 0.5, dim = 'x+y', prob = 1.0, slice = [5, 25])
+                    self.op = shift_v3(scale = 1.0, dim = 'x+y', prob = 0.5)
 
                 def renorm(self, x, dim = 0):
                     scale = self.scale
@@ -594,10 +598,17 @@ class Dataset:
                     pad = self.pad
                     return 2 * (np.clip((x - _min) / (_max - _min), 0.0, 1.0) - 0.5) * scale / 2 + scale / 2 + pad / 2
 
+                def renorm_v3(self, x):
+                    scale = 64
+                    x[..., 0] = x[..., 0] - 151
+                    x[..., 1] = x[..., 1] - 274
+
+                    return ((x / 210 - 0.5) * 2) * scale // 2 + scale // 2
+
                 def __getitem__(self, index):
 
-                    _id_landmarks = self.renorm(np.concatenate((id_landmark[0, 6:11,:],id_landmark[0, 48:68,:]), axis = 0))
-                    _landmarks = self.renorm(np.concatenate((landmarks[index, 6:11,:],landmarks[index, 48:68,:]), axis = 0))
+                    _id_landmarks = self.renorm_v3(np.concatenate((id_landmark[0, 6:11,:],id_landmark[0, 48:68,:]), axis = 0))
+                    _landmarks = self.renorm_v3(np.concatenate((landmarks[index, 6:11,:],landmarks[index, 48:68,:]), axis = 0))
                     
                     if augmentation:
                         _landmarks = self.op(_landmarks)
@@ -614,8 +625,6 @@ class Dataset:
                         cv2.polylines(landmark_map, [_landmarks[0:5,:].astype(np.int32)], False, (255, 255, 255), 1, cv2.LINE_AA)
                         cv2.polylines(landmark_map, [_landmarks[5:25,:].astype(np.int32)], True, (255, 255, 255), 1, cv2.LINE_AA)
                         #landmark_map = cv2.GaussianBlur(landmark_map, (5,5), 0.5)
-
-
                     elif self.type == "points":
                         _id_landmarks = _id_landmarks.astype(np.int32)
                         _landmarks = _landmarks.astype(np.int32)
@@ -647,7 +656,6 @@ class Dataset:
         self.landmarks = landmarks
         current_folder = "/data1/wanghaoran/Amemori/ExpressiveVideoStyleGanEncoding/"
         self.gen_files = [os.path.join(current_folder, x) for x in gen_file_list]
-
 
     def __len__(self):
         return self.length
@@ -813,6 +821,9 @@ def aligner(
     device = "cuda:0"
     writer = SummaryWriter(tensorboard_path)
     decoder = StyleSpaceDecoder(stylegan_path).to(device)
+    if hasattr(config, "stylegan_path"):
+        logger.info(config.stylegan_path)
+        decoder.load_state_dict(torch.load(config.stylegan_path))
     pti_path = None if not hasattr(config, "pti_path") else config.pti_path
     if pti_path is not None:
         decoder.load_state_dict(torch.load(pti_path))
@@ -844,7 +855,7 @@ def aligner(
             values = dataset.get_attr_z()
         offset_range = dataset.offset_range
     dataset = torch.utils.data.ConcatDataset(datasets_list)
-    dataloader = DataLoader(dataset, batch_size = config.batchsize, shuffle = True, num_workers = 8)
+    dataloader = DataLoader(dataset, batch_size = config.batchsize, shuffle = True, num_workers = 8, drop_last = True)
     training_batchsize = config.batchsize
     dataset_config = config.val
     val_dataset = Dataset(
@@ -887,7 +898,8 @@ def aligner(
                     pos = pos,
                     from_size = 512 if not hasattr(net_config, "from_size") else net_config.from_size,
                     act = "ReLU" if not hasattr(net_config, "act") else net_config.act,
-                    first_convbn = False if not hasattr(net_config, "first_convbn") else net_config.first_convbn
+                    first_convbn = False if not hasattr(net_config, "first_convbn") else net_config.first_convbn,
+                    target_size = 1 if not hasattr(net_config, "target_size") else net_config.target_size
                    )
     logger.info(net)
     best_nme = 100.0
@@ -962,7 +974,7 @@ def aligner(
                 scaler.update()
             total_count += 1
 
-            if idx % config.show_internal == 0:
+            if total_count % config.show_internal == 0:
                 #logger.info(f"epoch:{epoch}: {idx+1}/{len(dataloader)} loss {loss_value.mean().item()}, d_loss {d_loss_value.mean().item()} i_loss {i_loss_value.mean().item()} weight_loss {weight_loss_value.mean().item()} ")
                 logger.info(f"epoch:{epoch}: {idx+1}/{len(dataloader)} loss {loss_value.mean().item()}, d_loss {d_loss_value.mean().item()} i_loss {i_loss_value.mean().item()} ")
                 writer.add_scalar("loss", loss_value.mean().item(), total_count)
@@ -998,7 +1010,14 @@ def aligner(
         acc_value = acc_value.item()
         sim_value = sim_value.item()
         logger.info(f"nme is {nme_value}, acc is {acc_value}, sim is {sim_value} rnme is {rnme_value}.")
-        writer.add_scalar("nme", nme_value ,global_step = epoch)
+        writer.add_scalars("metric", \
+                            dict( \
+                                 nme = nme_value, \
+                                 acc = acc_value, \
+                                 sim = sim_value, \
+                                 rnme = rnme_value \
+                                ), \
+                            global_step = epoch)
         net.train()
         if nme_value < best_nme:
             last_path =  os.path.join(snapshots, "best.pth")
@@ -1028,12 +1047,13 @@ def sync_lip_validate(
                       attributes_path: str,
                       id_landmark_path: str,
                       save_path: str,
-                      video_landmark_path: str,
+                      video_images_path: str,
                       driving_images_dir: str = None,
                       **kwargs
                      ):
 
     supress = kwargs.get("supress", "linear")
+    _stylegan_path = kwargs.get("stylegan_path", None)
     assert save_path.endswith('mp4'), "expected postfix mp4, but got is {save_path}."
 
     device = "cuda:0"
@@ -1064,7 +1084,9 @@ def sync_lip_validate(
                     use_fourier = use_fourier,
                     from_size = 512 if not hasattr(net_config, "from_size") else net_config.from_size,
                     act = "ReLU" if not hasattr(net_config, "act") else net_config.act,
-                    first_convbn = False if not hasattr(net_config, "first_convbn") else net_config.first_convbn)
+                    first_convbn = False if not hasattr(net_config, "first_convbn") else net_config.first_convbn,
+                    target_size = 1 if not hasattr(net_config, "target_size") else net_config.target_size
+                    )
     net.to(device)
     state_dict = torch.load(offset_weight_path)
     weight = state_dict
@@ -1076,9 +1098,17 @@ def sync_lip_validate(
     net.eval()
     resolution = kwargs.get("resolution", 1024)
     decoder = StyleSpaceDecoder(stylegan_path, to_resolution = resolution)
+    #if _stylegan_path is not None:
+    #    logger.info(_stylegan_path)
+    #    decoder.load_state_dict(torch.load(_stylegan_path), False)
+    #from collections import OrderedDict
+    #new_dict = OrderedDict()
+    #for k,v in torch.load(pti_weight_path).items():
+    #    if "affine" not in k:
+    #        new_dict[k] = v
     decoder.load_state_dict(torch.load(pti_weight_path), False)
     decoder.to(device)
-    attributes = torch.load(attributes_path)
+    attributes = torch.load(attributes_path, map_location="cpu")
 
     #get_disentangled_landmarks = DisentangledLandmarks()
     #id_path = e4e_latent_path.replace("pt", "txt")
@@ -1093,7 +1123,7 @@ def sync_lip_validate(
     if isinstance(landmarks, str):
         landmarks = np.load(landmarks)[...,:2]
     #landmarks[..., 1] = 512 - landmarks[..., 1]
-    #landmarks = gaussian_filter1d(landmarks, sigma=2.0, axis=0)
+    landmarks = gaussian_filter1d(landmarks, sigma=1.0, axis=0)
     # hard code id video landmarks.
     id_landmarks = np.load(os.path.join(current_pwd, config.val.id_landmark_path))
 
@@ -1127,8 +1157,13 @@ def sync_lip_validate(
         driving_files = sorted(os.listdir(driving_images_dir), key = lambda x: int(''.join(re.findall('[0-9]+', x))))
         driving_files = [os.path.join(driving_images_dir, x) for x in driving_files]
 
+    assert os.path.isdir(video_images_path), "expected directory."
+    image_files = sorted(os.listdir(video_images_path), key = lambda x: int(''.join(re.findall('[0-9]+', x))))
+    image_files = [os.path.join(video_images_path, x) for x in image_files]
+
     frames = kwargs.get("frames", -1)
-    n = min(landmark_offsets.shape[0], len(attributes)) if frames == -1 else frames
+    n = min(landmark_offsets.shape[0], len(attributes), len(image_files), len(driving_files)) if frames == -1 else frames
+    logger.info(f"length is {n}..")
     t = Timer()
 
     batch_size = 8
@@ -1146,11 +1181,11 @@ def sync_lip_validate(
             if os.path.isdir(pose_latent_path):
                 self.pose = pose_latent_path
             else:
-                self.pose = torch.load(pose_latent_path)
+                self.pose = torch.load(pose_latent_path, map_location = "cpu")
 
         def __call__(self, i):
             if isinstance(self.pose, str):
-                return torch.load(os.path.join(pose_latent_path, f'{i + 1}.pt'))
+                return torch.load(os.path.join(pose_latent_path, f'{i + 1}.pt'), map_location = "cpu")
             else:
                 return self.pose[i]
 
@@ -1173,21 +1208,41 @@ def sync_lip_validate(
             _min, _max = self.min[0], self.max[0]
             return 2 * (np.clip((x - _min) / (_max - _min), 0.0, 1.0) - 0.5) * scale / 2 + scale / 2 + pad / 2
 
+        def renorm_v3(self, x, scale, pad):
+            x_copy = x.copy()
+            x_copy[..., 0] = x_copy[..., 0] - 151
+            x_copy[..., 1] = x_copy[..., 1] - 274
+
+            return ((x_copy / 210 - 0.5) * 2) * scale // 2 + scale // 2
+
         def __getitem__(self, index):
 
-            scale = 54
-            pad = 10
-            _id_landmarks = self.renorm(id_landmarks[0], scale, pad)
-            _landmarks = self.renorm(landmarks[index], scale, pad)
-
+            scale = 64
+            pad = 0
+            _id_landmarks = self.renorm_v3(id_landmarks[0], scale, pad)
+            _landmarks = self.renorm_v3(landmarks[index], scale, pad)
+    
             id_map = np.zeros((scale + pad, scale + pad, 3), dtype = np.uint8) #(np.random.random((scale + pad, scale + pad, 3)) * 200).astype(np.uint8)
             landmark_map = np.zeros((scale + pad , scale + pad, 3), dtype = np.uint8)
+
+            canvas = np.zeros((scale + pad, scale + pad, 3), dtype = np.uint8)
 
             if self.type == "polylines":
                 cv2.polylines(id_map, [_id_landmarks[0:5,:].astype(np.int32)], False, (255, 255, 255), 1, cv2.LINE_AA)
                 cv2.polylines(id_map, [_id_landmarks[5:25,:].astype(np.int32)], True, (255, 255, 255), 1, cv2.LINE_AA)
                 cv2.polylines(landmark_map, [_landmarks[0:5,:].astype(np.int32)], False, (255, 255, 255), 1, cv2.LINE_AA)
                 cv2.polylines(landmark_map, [_landmarks[5:25,:].astype(np.int32)], True, (255, 255, 255), 1, cv2.LINE_AA)
+
+                cv2.polylines(canvas, [_id_landmarks[0:5,:].astype(np.int32)], False, (255, 0, 0), 1, cv2.LINE_AA)
+                cv2.polylines(canvas, [_id_landmarks[5:25,:].astype(np.int32)], True, (255, 0, 0), 1, cv2.LINE_AA)
+                cv2.polylines(canvas, [_landmarks[0:5,:].astype(np.int32)], False, (0, 0, 255), 1, cv2.LINE_AA)
+                cv2.polylines(canvas, [_landmarks[5:25,:].astype(np.int32)], True, (0, 0, 255), 1, cv2.LINE_AA)
+                
+
+                target_path = os.path.join(current_pwd, "debug", f"{index + 1}.jpg")
+                os.makedirs(os.path.dirname(target_path), exist_ok = True)
+                cv2.imwrite(target_path, canvas)
+
                 #landmark_map = cv2.GaussianBlur(landmark_map, (5,5), 0.5)
             elif self.type == "points":
                 _id_landmarks = _id_landmarks.astype(np.int32)
@@ -1197,7 +1252,6 @@ def sync_lip_validate(
                     x, y = point
                     id_map[y_i, x_i, :] = 255
                     landmark_map[y, x, :] = 255
-            cv2.imwrite(os.path.join(current_pwd, f"results/maps/{index + 1}.jpg"), landmark_map)
             return ((np.concatenate((landmark_map[..., 0:1], id_map[..., 0:1]), axis = 2) / 255.0 - .5) * 2).transpose((2, 0, 1)) 
      
     if name == "offsetNetV2":
@@ -1206,97 +1260,12 @@ def sync_lip_validate(
     psnr_value = 0.0
     psnr_values = []
 
-    exclude = [
-                0,
-                11,
-                48,
-                61,
-                98,
-                111,
-                123,
-                136,
-                148,
-                161,
-                174,
-                186,
-                211,
-                248,
-                273,
-                286,
-                311,
-                361,
-                373,
-                386,
-                436,
-                448,
-                461,
-                473,
-                511,
-                523,
-                536,
-                548,
-                561,
-                573,
-                586,
-                611,
-                623,
-                636,
-                648,
-                661,
-                686,
-                698,
-                711,
-                723,
-                786,
-                798,
-                811,
-                823,
-                836,
-                848,
-                861,
-                873,
-                886,
-                898,
-                912,
-                924,
-                961,
-                1011,
-                1073,
-                1161,
-                1173,
-                1186,
-                1211,
-                1223,
-                1236,
-                1248,
-                1273,
-                1373,
-                1473,
-                1511,
-                1523,
-                1536,
-                1573,
-                1586,
-                1598,
-                1661,
-                1673,
-                1686,
-                1698,
-                1711,
-                1736,
-                1760,
-                1773,
-                1811,
-                1823,
-                1886,
-                1973
-              ]
     
     with imageio.get_writer(save_path, fps = 25) as writer:
         batch_size = 8
 
-        w_plus_with_pose = get_pose_func(0) #torch.load(os.path.join(pose_latent_path, f'{i + 1}.pt'))
-        style_space_latent = decoder.get_style_space(w_plus_with_pose)
+        w_plus_with_pose = get_pose_func(0).detach() #torch.load(os.path.join(pose_latent_path, f'{i + 1}.pt'))
+        style_space_latent = decoder.get_style_space(w_plus_with_pose.to(device))
         q = queue.Queue()
         q2 = queue.Queue()
 
@@ -1309,11 +1278,12 @@ def sync_lip_validate(
         def kernel():
             j = q.get()
             attribute = attributes[j]
-            w_plus_with_pose = get_pose_func(j) #torch.load(os.path.join(pose_latent_path, f'{i + 1}.pt'))
+            w_plus_with_pose = get_pose_func(j).detach().to(device) #torch.load(os.path.join(pose_latent_path, f'{i + 1}.pt'))
             style_space_latent = decoder.get_style_space(w_plus_with_pose)
             landmark_offset_np = landmark_offsets[j]
             landmark_offset[j % batch_size] = torch.from_numpy(landmark_offset_np).unsqueeze(0).float().to(device) 
             region_ss = update_region_offset(style_space_latent, torch.tensor(attribute[1][size_of_alpha:]).reshape(1, -1).to(device), [8, len(alphas)])
+            #region_ss = update_region_offset(style_space_latent, torch.tensor(attribute[1]).reshape(1, -1).to(device), [0, len(alphas)])
             for index, _  in enumerate(ss_updated):
                 ss_updated[index][j % batch_size, ...] = region_ss[index]
 
@@ -1324,7 +1294,7 @@ def sync_lip_validate(
             h,w = output.shape[:2]
             if driving_files is not None:
                 landmark_offset_np = landmark_offsets[j]
-                image = cv2.imread(driving_files[j])[...,::-1]
+                image = cv2.imread(image_files[j])[...,::-1]
                 w = h = 512
                 image = cv2.resize(image, (w,h))
                 output = cv2.resize(output, (w,h))
@@ -1332,6 +1302,9 @@ def sync_lip_validate(
                 blender = kwargs.get("blender", None)
                 output = merge_from_two_image(image, output, mask = mask, blender = blender)
                 
+                ref_image = cv2.imread(driving_files[j])[..., ::-1]
+                ref_image = cv2.resize(ref_image, (w,h))
+
                 if j in exclude:
                     merge_mask = np.zeros_like(output)
                     for (y1,y2, x1, x2) in output_copy_region:
@@ -1345,11 +1318,9 @@ def sync_lip_validate(
                     image_landmark = draw_multiple_landmarks([landmark ,id_landmarks[0]])
                 else:
                     image_landmark = cv2.resize((landmark_offset_np[0:1, :, :].repeat(3, axis = 0).transpose((1,2,0)) * 0.5 + 0.5) * 255, (w,h))
-                output = np.concatenate((output, image, image_landmark), axis = 0)
+                output = np.concatenate((output, ref_image, image_landmark), axis = 0)
             output_queue[j % batch_size] = output
-
-
-
+        
         for i in p_bar:
             end = min(i + batch_size, n)
             size = end - i
@@ -1357,7 +1328,7 @@ def sync_lip_validate(
             ss_updated = [torch.zeros_like(x).repeat(size, 1).to(device) for x in style_space_latent]
             [q.put(j) for j in range(i, end)]
             output_queue = [None for _ in range(size)]
-            workers = [threading.Thread(target = kernel, args = ()) for j in range(batch_size)]
+            workers = [threading.Thread(target = kernel, args = ()) for j in range(size)]
             for worker in workers:
                 worker.start()
 
@@ -1370,9 +1341,15 @@ def sync_lip_validate(
             with torch.no_grad():
                 offset = net(landmark_offset)
             ss_updated = update_lip_region_offset(ss_updated, offset)
+            
+            """
+            pti_training_folder = os.path.join(current_pwd, "pti")
+            os.makedirs(pti_training_folder, exist_ok = True)
+            [torch.save([x.detach().cpu() for x in ss_updated], os.path.join(pti_training_folder, f"{jj + 1}.pt")) for jj in range(i, end)]
+            """
             outputs = torch.clip((decoder(ss_updated) * 0.5 + 0.5) * 255.0, 0.0, 255.0)
             [q2.put(j) for j in range(i, end)]
-            workers_out = [threading.Thread(target = kernel2, args = ()) for j in range(batch_size)]
+            workers_out = [threading.Thread(target = kernel2, args = ()) for j in range(size)]
             for worker in workers_out:
                 worker.start()
             for worker in workers_out:
@@ -1380,8 +1357,11 @@ def sync_lip_validate(
             for index, output in enumerate(output_queue):
                 #j = index + i
                 #if j in exclude:
+                #    target_path = os.path.join(os.path.dirname(save_path), os.path.basename(save_path).split(".")[0], "video")
+                #    os.makedirs(target_path, exist_ok = True)
+                #    cv2.imwrite(os.path.join(target_path, f"{exclude.index(j) + 1}.jpg"), np.uint8(output)[..., ::-1])
                 writer.append_data(np.uint8(output))
-
+        """
         psnr_list = np.array(psnr_values)
         n = len(exclude)
         with open("psnr.txt", 'a+') as f:
@@ -1405,8 +1385,8 @@ def sync_lip_validate(
                 for index, value in zip(exclude, psnr_values):
                     line = f"{index}" + blank + str(round(value, 3)) + "\n"
                     f.write(line)
-
-        logger.info(f"psnr : {psnr_value / n}, min: {psnr_list.min()}, max: {psnr_list.max()}")
+        logger.info(f"psnr : {psnr_list.mean()}, min: {psnr_list.min()}, max: {psnr_list.max()}")
+        """
 
 def evaluate(
              config_path: str,
@@ -1440,7 +1420,8 @@ def evaluate(
                     use_fourier = use_fourier,
                     from_size = 512 if not hasattr(net_config, "from_size") else net_config.from_size,
                     act = "ReLU" if not hasattr(net_config, "act") else net_config.act,
-                    first_convbn = False if not hasattr(net_config, "fist_convbn") else net_config.first_convbn
+                    first_convbn = False if not hasattr(net_config, "fist_convbn") else net_config.first_convbn,
+                    target_size = 1 if not hasattr(net_config, "target_size") else net_config.target_size
                    )
 
     net.to(device)

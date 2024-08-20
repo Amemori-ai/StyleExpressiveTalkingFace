@@ -23,11 +23,10 @@ def infer(
 
     net_config = config.net.config
     net_weight = config.net.weight
-    video_landmark_path = None#config.video_landmark
+    video_images_path = config.video_images_path
     
     pti_weight = config.pti.weight
-
-    if not pti_weight.endswith('pt'):
+    if not pti_weight.endswith('pt') and not pti_weight.endswith("pth"):
         folder = pti_weight
         pti_weight = os.path.join(folder, sorted(os.listdir(pti_weight), key = lambda x: int(''.join(re.findall('[0-9]+', x))))[-1])
         print(f"latest weight path is {pti_weight}")
@@ -55,12 +54,13 @@ def infer(
                       attribute_weight,
                       id_landmark,
                       save_path,
-                      video_landmark_path,
+                      video_images_path,
                       driving_images_dir,
                       resolution = config.resolution,
                       blender = blender,
                       frames = frames if not hasattr(config, "frames") else config.frames,
-                      supress = supress
+                      supress = supress,
+                      stylegan_path = None if not hasattr(config, "stylegan_path") else config.stylegan_path
                      )
 @click.command()
 @click.option('--config_path')

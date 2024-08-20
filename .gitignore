@@ -15,7 +15,9 @@
 tags
 
 tests/*.mp4
-scripts/exp*                       
+scripts/exp*
+scripts/*expressive*
+scripts/config*
 
 # soft link
 codes

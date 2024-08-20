@@ -227,16 +227,17 @@ class DisentangledLandmarks:
             # diff -> lm3d/lm3d
             lm3d = self.key_mean_shape.reshape(1, 68, 3) + lm3d_diff.reshape(-1, 68, 3) / 10
             lm2d = self.denorm_lm3d_to_lm2d(lm3d)
+
+            # center alignment
+            lrs3_face = (self.lrs3_idexp_mean / 10.0 + self.key_mean_shape.reshape((1, 68, 3)))
+            lrs3_face = self.denorm_lm3d_to_lm2d(lrs3_face)
+            lrs3_center = np.mean(lrs3_face[:, 48:68, :2], axis=1, keepdims=True)  # (1,1, 3)
+            lm2d_center = np.mean(lm2d[:, 48:68, :], axis=1, keepdims=True)  # (1,1, 3)
+            lm2d = lm2d - (lm2d_center - lrs3_center)  # (n,68, 3)
         else:
             lm3d = self.reconstruct_idexp_lm3d(coeff[:, :80], coeff[:, 80:144], add_mean_face=True)
             lm2d = self.denorm_lm3d_to_lm2d(lm3d)
 
-        # center alignment
-        #lrs3_face = (self.lrs3_idexp_mean / 10.0 + self.key_mean_shape.reshape((1, 68, 3)))
-        #lrs3_face = self.denorm_lm3d_to_lm2d(lrs3_face)
-        #lrs3_center = np.mean(lrs3_face[:, 48:68, :2], axis=1, keepdims=True)  # (1,1, 3)
-        #lm2d_center = np.mean(lm2d[:, 48:68, :], axis=1, keepdims=True)  # (1,1, 3)
-        #lm2d = lm2d - (lm2d_center - lrs3_center)  # (n,68, 3)
         return lm2d
 
     def renorm_landmarks(self, landmarks):
@@ -252,7 +253,8 @@ class DisentangledLandmarks:
 
     def get_landmark(
                      self,
-                     face: Union[str , np.ndarray]
+                     face: Union[str , np.ndarray],
+                     norm: bool
                     ):
     
         self.temp_steps = 0
@@ -260,18 +262,21 @@ class DisentangledLandmarks:
         if isinstance(face, str):
             face = cv2.imread(face)
             assert face is not None, "face path not exits"
+
         if face is None:
             return self.coeff2lm2d(None)
+
         # Setp 7 Get 3dmm coeff file
         coef = self.get_3dmm_coeff(face)
-        return self.coeff2lm2d(coef)
-    
+        return self.coeff2lm2d(coef, norm)
 
     def __call__(
             self,
-            face: Union[str , np.ndarray]
+            face: Union[str , np.ndarray],
+            norm: bool = False
         ):
         return self.get_landmark(
-                                 face
+                                 face,
+                                 norm
                                 )
 

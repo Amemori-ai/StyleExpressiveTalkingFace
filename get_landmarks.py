@@ -3,9 +3,7 @@ import cv2
 import click
 import tqdm
 import re
-
 import numpy as np
-
 
 from TalkingFace.get_disentangle_landmarks import DisentangledLandmarks
 
@@ -13,9 +11,11 @@ from TalkingFace.get_disentangle_landmarks import DisentangledLandmarks
 @click.option('--from_path')
 @click.option('--to_path')
 @click.option('--shutup', is_flag = True)
+@click.option('--norm', is_flag = True)
 def get_landmarks(from_path, 
                   to_path,
-                  shutup
+                  shutup,
+                  norm
                   ):
     """get landmarks 
     """
@@ -36,8 +36,6 @@ def get_landmarks(from_path,
     files = [os.path.join(from_path, x) for x in files]
 
     p_bar = tqdm.tqdm(files)
-
-
     for _file in p_bar:
         image = cv2.imread(_file)
         assert image is not None, f"{_file} not exists."

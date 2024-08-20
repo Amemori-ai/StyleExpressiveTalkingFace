@@ -9,17 +9,20 @@
 #landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/transformed.npy"
 #landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_rCU.npy
 
-landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_tJR.npy"
+#landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_tJR.npy"
 #landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_Pyb.npy"
-#landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/0/ldm3d.npy"
+#landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/0/train_landmarks.npy"
 
+landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_Mzfv2.npy"
 #landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_PMJ.npy"
+
 net:
-    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp236/config.yaml"
-    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp236/snapshots/best.pth"
+    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp259_v3/config.yaml"
+    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp259_v3/snapshots/best.pth"
     #weight: "/data1/chenlong/local_code/StyleExpressiveTalkingFace-master/results/man3_s0_20240118_set/snapshots/best.pth"
+
 pti:
-    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pivot_053/snapshots/"
+    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pivot_067/snapshots/"
     #weight: "/data1/chenlong/0517/video/0522/kanghui_0/results/kanghui_w_speed/pti/w_snapshots/"
     #weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/man3/pti/snapshots/"
     #weight: "/data1/chenlong/0517/video/0522/2/results/man3_chenl_0521/man3_pivot_512/snapshots/"
@@ -52,6 +55,7 @@ pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingF
 #driving_images_dir: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/exp010/0/driving_video_cut/smooth/"
 
 #driving_images_dir: "/data1/Dataset/chenlong/tx/frames/smooth"
+video_images_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/output/smooth"
 driving_images_dir: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/output/smooth"
 #driving_images_dir: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/exp010/0/data/smooth"
 #driving_images_dir: "/data1/chenlong/0517/video/0522/2/results/man3_chenl_0521/data/smooth"

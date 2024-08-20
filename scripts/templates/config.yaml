@@ -1,0 +1,43 @@
+net:
+    name: "offsetNetV2"
+    in_channels: 2
+    lr: 0.0003
+    depth: 0
+    norm_type: "force_linear"
+    norm_dim: [0, 1]
+    base_channels: 64
+    from_size: 64
+    renorm: znorm
+    max_channels: 512
+    norm: BatchNorm2d
+    act: LeakyReLU
+    remap: True
+
+pose_path: "./dataset/%DATASET%/pose.pt"
+attr_path: "./dataset/%DATASET%/attribute.pt"
+
+data:
+    - dataset:
+             attr_path: "./dataset/%DATASET%/train_attr.pt"
+             ldm_path: "./dataset/%DATASET%/train_landmarks.npy"
+             id_path: "./dataset/%DATASET%/id.pt"
+             id_landmark_path: "./dataset/%DATASET%/id_landmark.npy"
+             augmentation: False
+             is_flow_map: True
+
+val:
+    attr_path: "./dataset/%DATASET%/train_attr.pt"
+    ldm_path: "./dataset/%DATASET%/train_landmarks.npy"
+    id_path: "./dataset/%DATASET%/id.pt"
+    id_landmark_path: "./dataset/%DATASET%/id_landmark.npy"
+    is_flow_map: True
+
+optim:
+    step: 100
+    gamma: 0.5
+
+batchsize: 128
+epochs: 400
+show_internal: 100
+save_internal: 5
+reload: False

@@ -12,6 +12,7 @@ def get_id_landmark(
     gen_files_list, selected_id_image, selected_id_latent, selected_id = torch.load(id_path)
     landmarks = np.load(landmark_path)
     # np.save(to_path, landmarks[selected_id - 1: selected_id, ...])
+    print(selected_id)
     np.save(to_path, landmarks[selected_id: selected_id+1, ...])
 
 @click.command()

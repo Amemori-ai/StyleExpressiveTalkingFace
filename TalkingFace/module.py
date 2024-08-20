@@ -34,7 +34,8 @@ class BaseConv2d(nn.Module):
                  p,
                  norm = "BatchNorm2d",
                  act = "ReLU",
-                 repeat = 0
+                 repeat = 0,
+                 bias = True
                 ):
         super().__init__()
 
@@ -44,7 +45,7 @@ class BaseConv2d(nn.Module):
             args = dict(negative_slope = 0.1)
 
         modules = [
-                    nn.Conv2d(input_channels, output_channels, k, s, p),
+                    nn.Conv2d(input_channels, output_channels, k, s, p, bias = bias),
                     getattr(nn, norm)(output_channels),
                   ]
         if act is not None:
@@ -52,9 +53,10 @@ class BaseConv2d(nn.Module):
             modules += [act_module]
 
         if repeat > 0:
-            modules += [
-                         ResidualBlock(output_channels, act_module)
-                       ]
+            for _ in range(repeat):
+                modules += [
+                             ResidualBlock(output_channels, norm, act_module)
+                           ]
         self.base_conv = nn.Sequential(*modules)
 
     def forward(self, x):
@@ -81,15 +83,16 @@ class ResidualBlock(nn.Module):
     def __init__(
                  self, 
                  channels: int,
-                 act: nn.Module = None
+                 norm: str,
+                 act: nn.Module = None,
                 ):
         super().__init__()
-        self.conv = nn.Conv2d(channels, channels, 3, 1, 1)
+        self.conv = nn.Sequential(*[nn.Conv2d(channels, channels, 3, 1, 1), getattr(nn, norm)(channels)])
         self.act = act
         
     def forward(self, x):
         if self.act is not None:
-            return x + self.act(self.conv(x))
+            return self.act(x + self.conv(x))
         else:
             return x + self.conv(x)
 

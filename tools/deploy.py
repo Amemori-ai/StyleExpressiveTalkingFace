@@ -78,7 +78,8 @@ class TalkingFaceModel(torch.nn.Module):
                         use_fourier = use_fourier,
                         from_size = 512 if not hasattr(net_config, "from_size") else net_config.from_size,
                         act = "ReLU" if not hasattr(net_config, "act") else net_config.act,
-                        first_convbn = False if not hasattr(net_config, "first_convbn") else net_config.first_convbn
+                        first_convbn = False if not hasattr(net_config, "first_convbn") else net_config.first_convbn,
+                        target_size = 1 if not hasattr(net_config, "target_size") else net_config.target_size
                        )
         logger.info(net)
         net.load_state_dict(torch.load(net_weight_path)['weight'])
@@ -177,8 +178,8 @@ def deploy(
     shutil.copy(os.path.join(current_path, config.data[0].dataset.id_landmark_path), to_path_landmark)
 
     logger.info("get style space latents.")
-    attributes = torch.load(os.path.join(current_path, config.attr_path))
-    pose_latents = torch.load(os.path.join(current_path, config.pose_path))
+    attributes = torch.load(os.path.join(current_path, config.attr_path), map_location = "cpu")
+    pose_latents = torch.load(os.path.join(current_path, config.pose_path), map_location = "cpu")
     n = len(attributes)
     p_bar = tqdm.tqdm(range(n))
     to_save_list = []
@@ -201,8 +202,8 @@ def deploy(
         mask = get_blend_mask(cv2.imread(_path), face_parse)
         writer.append_data(np.uint8(mask))
         attribute = attributes[i]
-        w_plus_with_pose = pose_latents[i]
-        style_space_latent = model.decoder.get_style_space(w_plus_with_pose)
+        w_plus_with_pose = pose_latents[i].detach().cpu()
+        style_space_latent = model.decoder.get_style_space(w_plus_with_pose.to("cuda:0"))
         ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1][size_of_alpha:]).reshape(1, -1).to('cuda:0'), [8, len(alphas)])
         #ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1]).reshape(1, -1).to('cuda:0'), [0, len(alphas)])
 

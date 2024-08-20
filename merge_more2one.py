@@ -16,6 +16,12 @@ if __name__ == '__main__':
 
     for _file in files:
         attr_list = torch.load(_file)
-        attrs_list.append(attr_list)
+        if isinstance(attr_list, list):
+            x,y = attr_list
+            x = x.cpu()
+            y = [_y.cpu() for _y in y]
+            attrs_list.append([x, y])
+        else:
+            attrs_list.append(attr_list)
     assert len(attrs_list) >0, "no file has been processed."
     torch.save(attrs_list, dst_file)
