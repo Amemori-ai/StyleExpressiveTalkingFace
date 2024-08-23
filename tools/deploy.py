@@ -122,7 +122,8 @@ def deploy(
             exp_name: str,
             decoder_path: str,
             to_path: str,
-            image_path: str
+            image_path: str,
+            patch: bool = False
          ):
     
     #assert os.path.isdir(to_path), "to_path expected is directory."
@@ -166,6 +167,12 @@ def deploy(
     #module.save(to_path_model)
     onnx_model_path = to_path_model.replace('pt', 'onnx')
     torch.onnx.export(model, (_input, style_space), onnx_model_path, verbose = True, opset_version = 15, do_constant_folding = True)
+
+    if patch:
+        logger.info("update patch")
+        return 
+
+
     logger.info("get landmark.")
 
     output_onnx = onnx_infer(onnx_model_path, _input, style_space)
@@ -234,13 +241,15 @@ def deploy(
 @click.option('--decoder_path')
 @click.option('--to_path')
 @click.option('--image_path')
+@click.option('--patch', default = 0)
 def _invoker_deploy(
                     exp_name,
                     decoder_path,
                     to_path,
-                    image_path
+                    image_path,
+                    patch
                    ):
-    return deploy(exp_name, decoder_path, to_path, image_path)
+    return deploy(exp_name, decoder_path, to_path, image_path, patch)
 
 if __name__ == '__main__':
     _invoker_deploy()

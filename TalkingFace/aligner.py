@@ -398,6 +398,7 @@ class offsetNet(nn.Module):
             def renorm(x):
                 self.z_values.to(x)
                 return torch.clip(x * self.z_values[1, :] + self.z_values[0, :],  self.clip_values[:,0], self.clip_values[:, 1])
+                #return x * self.z_values[1, :] + self.z_values[0, :]
             self.renorm = renorm
         else:
             raise RuntimeError("unexpected renorm function.")
@@ -445,7 +446,8 @@ class offsetNet(nn.Module):
 
         x = x.reshape(n, -1)
         y = self.net(x)
-        return self.renorm(y)
+        return torch.clip(y * self.z_values[1, ...] + self.z_values[0, ...], self.clip_values[0, ...], self.clip_values[1, ...])
+        #return self.renorm(y)
 
 class offsetNetV2(offsetNet):
 
@@ -520,7 +522,8 @@ class offsetNetV2(offsetNet):
         else:
             x = self.norm(x)
         y = self.net(x)
-        return self.renorm(y)
+        return torch.clip(y * self.z_values[1, ...] + self.z_values[0, ...], self.clip_values[..., 0], self.clip_values[..., 1])
+    #return self.renorm(y)
 
 class Dataset:
     def __init__(
