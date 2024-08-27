@@ -11,7 +11,7 @@ function main
     CUDA_VISIBLE_DEVICES=$1 python -m TalkingFace \
                            --config_path `pwd`/scripts/${exp_name}/config.yaml \
                            --save_path `pwd`/results/${exp_name} \
-                           --resume_path `pwd`/results/exp184/snapshots/best.pth
+                           --gpus 4
 }
 
 if [ ! -d "log/${exp_name}" ]; then
@@ -21,4 +21,4 @@ fi
 
 _timestamp=`date +%Y%m%d%H`
 
-main 7
+main 0,1,2,3

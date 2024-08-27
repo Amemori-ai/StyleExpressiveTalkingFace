@@ -16,6 +16,7 @@ import time
 
 import torch.nn as nn
 import numpy as np
+import torch.distributed as dist
 
 from functools import partial
 from typing import Callable, Union, List
@@ -29,7 +30,13 @@ from torchvision.utils import make_grid
 from torch.utils.data import DataLoader, ConcatDataset
 from TalkingFace.util import merge_from_two_image, output_copy_region
 
-current_pwd = os.getcwd()
+
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data.distributed import DistributedSampler
+
+#current_pwd = os.getcwd()
+
+current_pwd = os.environ.get("PWD", os.getcwd())
 
 from .get_disentangle_landmarks import DisentangledLandmarks, landmarks_visualization, draw_landmarks, draw_multiple_landmarks
 where_am_i = os.path.dirname(os.path.realpath(__file__))
@@ -44,6 +51,8 @@ from .equivalent_offset import fused_offsetNet
 from ExpressiveEncoding.loss.FaceParsing.model import BiSeNet
 
 from .extra import exclude
+
+torch.multiprocessing.set_sharing_strategy('file_system')
 
 psnr_func = lambda x,y: 20 * torch.log10(1.0 / torch.sqrt(torch.mean((x - y) ** 2)))
 psnr_func_np = lambda x,y: 20 * np.log10(255.0 / np.sqrt(np.mean((x - y) ** 2)))
@@ -802,7 +811,8 @@ def update_region_offset_v2(
 def aligner(
             config_path: str,
             save_path: str,
-            resume_path: str = None
+            resume_path: str = None,
+            **kwargs
            ):
 
     import time
@@ -821,8 +831,17 @@ def aligner(
     tensorboard_path = os.path.join(save_path, "tensorboard", f"{time.time()}")
     os.makedirs(snapshots, exist_ok = True)
     os.makedirs(tensorboard_path, exist_ok = True)
+
+    rank = kwargs.get("rank", -1)
+    world_size = kwargs.get("world_size", 0)
     device = "cuda:0"
-    writer = SummaryWriter(tensorboard_path)
+
+    if rank != -1:
+        device = rank
+        dist.init_process_group("nccl", rank=rank, world_size=world_size) 
+        torch.cuda.set_device(rank)
+    if rank <= 0:
+        writer = SummaryWriter(tensorboard_path)
     decoder = StyleSpaceDecoder(stylegan_path).to(device)
     if hasattr(config, "stylegan_path"):
         logger.info(config.stylegan_path)
@@ -858,7 +877,16 @@ def aligner(
             values = dataset.get_attr_z()
         offset_range = dataset.offset_range
     dataset = torch.utils.data.ConcatDataset(datasets_list)
-    dataloader = DataLoader(dataset, batch_size = config.batchsize, shuffle = True, num_workers = 8, drop_last = True)
+    
+
+    if rank != -1:
+        dataloader = DataLoader(
+                                dataset, batch_size = config.batchsize // world_size, \
+                                pin_memory = True,\
+                                sampler = DistributedSampler(dataset, shuffle = True, rank = rank, num_replicas = world_size, drop_last = True), \
+                               )
+    else:
+        dataloader = DataLoader(dataset, batch_size = config.batchsize, shuffle = True, num_workers = 8, drop_last = True)
     training_batchsize = config.batchsize
     dataset_config = config.val
     val_dataset = Dataset(
@@ -870,7 +898,9 @@ def aligner(
                            use_point = use_point,
                            augmentation = False if not hasattr(dataset_config,"augmentation") else dataset_config.augmentation
                          )
-    val_dataloader = DataLoader(val_dataset, batch_size = config.batchsize, shuffle = False)
+    if rank <= 0:
+        batchsize = config.batchsize if rank == -1 else config.batchsize * world_size
+        val_dataloader = DataLoader(val_dataset, batch_size = batchsize, shuffle = False)
 
     # init net
     is_refine = False if not hasattr(net_config, "is_refine") else net_config.is_refine
@@ -880,7 +910,6 @@ def aligner(
     if use_fourier:
         pos = np.load(os.path.join(current_pwd, dataset_config.id_landmark_path))
         pos = np.concatenate(((pos)[0, 48:68, :], (pos)[0, 6:11, :]), axis = 0)
-
 
     net = eval(name)(\
                     net_config.in_channels * 2 if name == "offsetNet" else net_config.in_channels, size_of_alpha, \
@@ -926,6 +955,9 @@ def aligner(
     for p in net.parameters():
         p.requires_grad = True
 
+    if rank != -1:
+        net =  DDP(net, device_ids = [rank])
+
     optimizer = torch.optim.AdamW(net.parameters(), lr = net_config.lr) #Adam(net.parameters(), lr = net_config.lr)
     sche_name = "StepLR" if not hasattr(config.optim,"sche") else config.optim.sche
     sche = getattr(torch.optim.lr_scheduler, sche_name)
@@ -964,8 +996,12 @@ def aligner(
                 #for weight in weights:
                 #    weight = weight.repeat(n, 1, 1)
                 #    weight_loss_value += loss_i(weight * attr.reshape(n, -1, 1), weight * pred_attr.reshape(n, -1, 1))
-                attr = ((attr - net.clip_values[:, 0]) / (net.clip_values[:, 1] - net.clip_values[:, 0]))
-                pred_attr = (pred_attr - net.clip_values[:,0]) / (net.clip_values[:,1] - net.clip_values[:,0])
+                if rank == -1:
+                    attr = ((attr - net.clip_values[:, 0]) / (net.clip_values[:, 1] - net.clip_values[:, 0]))
+                    pred_attr = (pred_attr - net.clip_values[:,0]) / (net.clip_values[:,1] - net.clip_values[:,0])
+                else:
+                    attr = ((attr - net.module.clip_values[:, 0]) / (net.module.clip_values[:, 1] - net.module.clip_values[:, 0]))
+                    pred_attr = (pred_attr - net.module.clip_values[:,0]) / (net.module.clip_values[:,1] - net.module.clip_values[:,0])
 
                 d_loss_value = 1 - loss_d(pred_attr, attr).mean() 
                 i_loss_value = loss_i(attr, pred_attr)
@@ -977,58 +1013,67 @@ def aligner(
                 scaler.update()
             total_count += 1
 
-            if total_count % config.show_internal == 0:
+            if total_count % config.show_internal == 0 and (rank == 0 or rank == -1):
                 #logger.info(f"epoch:{epoch}: {idx+1}/{len(dataloader)} loss {loss_value.mean().item()}, d_loss {d_loss_value.mean().item()} i_loss {i_loss_value.mean().item()} weight_loss {weight_loss_value.mean().item()} ")
                 logger.info(f"epoch:{epoch}: {idx+1}/{len(dataloader)} loss {loss_value.mean().item()}, d_loss {d_loss_value.mean().item()} i_loss {i_loss_value.mean().item()} ")
                 writer.add_scalar("loss", loss_value.mean().item(), total_count)
                 writer.add_image(f'image', make_grid(offset[:, 0:1, ...].detach(),normalize=True, scale_each=True), epoch)
-
-        nme_value = 0.0
-        acc_value = 0.0
-        sim_value = 0.0
-        # validate 
-        net.eval()
-        for idy, data in enumerate(val_dataloader):
-            attr, offset = data
-            attr = attr.to(device)
-            offset = offset.to(device)
-            with torch.no_grad():
-                pred_attr = net(offset)
-
-            if isinstance(pred_attr, tuple):
-                pred_attr = pred_attr[0]
-
-            acc_value += (torch.sign(pred_attr) == torch.sign(attr)).to(torch.float32).mean()
-            attr = (attr - net.clip_values[:, 0]) / (net.clip_values[:, 1] - net.clip_values[:, 0])
-            pred_attr = (pred_attr - net.clip_values[:,0]) / (net.clip_values[:,1] - net.clip_values[:,0])
-
-            nme_value += torch.nn.functional.mse_loss(attr, pred_attr).mean()
-            sim_value += torch.nn.functional.cosine_similarity(attr, pred_attr).mean()
-
-        nme_value /= len(val_dataloader)
-        acc_value /= len(val_dataloader)
-        sim_value /= len(val_dataloader)
-        rnme_value = torch.sqrt(nme_value).item()
-        nme_value = nme_value.item()
-        acc_value = acc_value.item()
-        sim_value = sim_value.item()
-        logger.info(f"nme is {nme_value}, acc is {acc_value}, sim is {sim_value} rnme is {rnme_value}.")
-        writer.add_scalars("metric", \
-                            dict( \
-                                 nme = nme_value, \
-                                 acc = acc_value, \
-                                 sim = sim_value, \
-                                 rnme = rnme_value \
-                                ), \
-                            global_step = epoch)
-        net.train()
-        if nme_value < best_nme:
-            last_path =  os.path.join(snapshots, "best.pth")
-            best_nme = nme_value
-            torch.save(dict(weight = net.state_dict(), best_value = best_nme, epoch = epoch), last_path)
-            logger.info(f"{epoch} weight saved.")
         sche.step()
-        writer.add_scalar("learning rate", optimizer.param_groups[0]['lr'] ,global_step = epoch)
+        if rank <= 0:
+            nme_value = 0.0
+            acc_value = 0.0
+            sim_value = 0.0
+            # validate 
+            net.eval()
+            for idy, data in enumerate(val_dataloader):
+                attr, offset = data
+                attr = attr.to(device)
+                offset = offset.to(device)
+                with torch.no_grad():
+                    pred_attr = net(offset)
+
+                if isinstance(pred_attr, tuple):
+                    pred_attr = pred_attr[0]
+
+                acc_value += (torch.sign(pred_attr) == torch.sign(attr)).to(torch.float32).mean()
+                if rank == -1:
+                    attr = ((attr - net.clip_values[:, 0]) / (net.clip_values[:, 1] - net.clip_values[:, 0]))
+                    pred_attr = (pred_attr - net.clip_values[:,0]) / (net.clip_values[:,1] - net.clip_values[:,0])
+                else:
+                    attr = ((attr - net.module.clip_values[:, 0]) / (net.module.clip_values[:, 1] - net.module.clip_values[:, 0]))
+                    pred_attr = (pred_attr - net.module.clip_values[:,0]) / (net.module.clip_values[:,1] - net.module.clip_values[:,0])
+
+                nme_value += torch.nn.functional.mse_loss(attr, pred_attr).mean()
+                sim_value += torch.nn.functional.cosine_similarity(attr, pred_attr).mean()
+
+            nme_value /= len(val_dataloader)
+            acc_value /= len(val_dataloader)
+            sim_value /= len(val_dataloader)
+            rnme_value = torch.sqrt(nme_value).item()
+            nme_value = nme_value.item()
+            acc_value = acc_value.item()
+            sim_value = sim_value.item()
+            logger.info(f"nme is {nme_value}, acc is {acc_value}, sim is {sim_value} rnme is {rnme_value}.")
+            writer.add_scalars("metric", \
+                                dict( \
+                                     nme = nme_value, \
+                                     acc = acc_value, \
+                                     sim = sim_value, \
+                                     rnme = rnme_value \
+                                    ), \
+                                global_step = epoch)
+            net.train()
+            if nme_value < best_nme:
+                last_path =  os.path.join(snapshots, "best.pth")
+                best_nme = nme_value
+                if rank == -1:
+                    torch.save(dict(weight = net.state_dict(), best_value = best_nme, epoch = epoch), last_path)
+                else:
+                    torch.save(dict(weight = net.module.state_dict(), best_value = best_nme, epoch = epoch), last_path)
+                logger.info(f"{epoch} weight saved.")
+            writer.add_scalar("learning rate", optimizer.param_groups[0]['lr'] ,global_step = epoch)
+    if rank <= 0:
+        writer.close()
     return last_path
 
 def get_gen_image(

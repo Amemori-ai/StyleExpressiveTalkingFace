@@ -39,6 +39,7 @@ data_npy/
 # temp file.
 results
 error.txt
+start.sh
 
 /scripts/lm_train_data/scripts
 /release
