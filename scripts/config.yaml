@@ -17,12 +17,15 @@ landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/la
 #landmarks_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/landmarks_PMJ.npy"
 
 net:
-    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp259_v3/config.yaml"
-    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp259_v3/snapshots/best.pth"
+    config: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/scripts/exp256/config.yaml"
+    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/results/exp256/snapshots/best.pth"
     #weight: "/data1/chenlong/local_code/StyleExpressiveTalkingFace-master/results/man3_s0_20240118_set/snapshots/best.pth"
 
 pti:
-    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pivot_067/snapshots/"
+    #weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pivot_067/snapshots/"
+    #weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pivot_052/snapshots/55.pth"
+    weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/bdinv_detail_002/snapshots/1.pth"
+
     #weight: "/data1/chenlong/0517/video/0522/kanghui_0/results/kanghui_w_speed/pti/w_snapshots/"
     #weight: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/man3/pti/snapshots/"
     #weight: "/data1/chenlong/0517/video/0522/2/results/man3_chenl_0521/man3_pivot_512/snapshots/"
@@ -42,6 +45,8 @@ e4e_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/i
 id_landmark: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/0/id_landmark.npy"
 #pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pose_finetuning_030/pose"
 pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/pose_finetuning_020_stable/pose_stabled"
+f_space_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/dataset/exp010/0/f_space.pt"
+
 #pose_latent_path: "/data1/wanghaoran/Amemori/StyleExpressiveTalkingFace/TalkingFace/ExpressiveVideoStyleGanEncoding/results/man3/pose"
 
 

@@ -13,6 +13,7 @@ import random
 import threading
 import queue
 import time
+import scipy
 
 import torch.nn as nn
 import numpy as np
@@ -114,6 +115,29 @@ for k,v in alphas[:8]:
     size_of_alpha += len(v)
 
 where_am_i = os.path.dirname(os.path.realpath(__file__))
+
+class smooth1d_pytorch(nn.Module):
+    def __init__(
+                 self, 
+                 ksize = 8,
+                 sigma = 7.0
+                ):
+        super().__init__()
+
+        #kernel = scipy.signal.gaussian(ksize, std = sigma).reshape(1, ksize)
+        kernel = cv2.getGaussianKernel(ksize, sigma = sigma)
+        self.filter = nn.Conv1d(1, 1, ksize, bias = False, stride = 1, padding = 'same')
+        self.filter.weight = torch.nn.Parameter(torch.Tensor(kernel).view(1,1,ksize))
+        self.ksize = ksize
+
+    def forward(self, x):
+        n,c = x.shape
+        if n < self.ksize:
+            repeat_num = self.ksize - n
+            x = torch.cat((x, x[n-1:n].repeat(repeat_num, 1)), dim = 0)
+        y = x.view(self.ksize,1,c).permute((2,1,0))
+        return self.filter(y).view(c, self.ksize).permute((1,0))[:n, ...]
+
 class face_parsing:
     def __init__(self, path = os.path.join(where_am_i, "ExpressiveVideoStyleGanEncoding", "ExpressiveEncoding", "third_party", "models", "79999_iter.pth")):
 
@@ -487,6 +511,8 @@ class offsetNetV2(offsetNet):
         channels = [base_channels * (2 ** i) for i in range(layers)]
         channels = [x if x <= max_channels else max_channels for x in channels]
 
+        self.channels = channels
+
         class BlurModule(nn.Module):
             def __init__(self, in_channels):
                 super().__init__()
@@ -534,6 +560,127 @@ class offsetNetV2(offsetNet):
         return torch.clip(y * self.z_values[1, ...] + self.z_values[0, ...], self.clip_values[..., 0], self.clip_values[..., 1])
     #return self.renorm(y)
 
+class CrossAttention(nn.Module):
+    def __init__(self, dim, heads = 8,):
+        pass
+
+    def forward(self, x):
+        pass
+
+class Fusion(nn.Module):
+    def __init__(self, channels, frames = 2):
+        super().__init__()
+        kernel = 3
+        self.module = nn.Linear(2 * channels, channels, bias = False) #nn.Conv1d(2 * channels, channels, kernel, stride = 1, padding = (kernel - 1) // 2, groups = channels)
+        self.frames = frames
+
+    def forward(self, feats):
+        n, _ = feats.shape
+
+        batches = [feats[i: i + self.frames] for i in range(n)]
+        ans = []
+        for i in range(len(batches)):
+            if len(batches[i]) < self.frames:
+                tmp = batches[i]
+                length = len(batches[i])
+                batches[i] = torch.cat((tmp, tmp[-1].repeat((self.frames - length, 1))), dim = 0)
+            cur_feat = batches[i][0:1]
+            feats = [cur_feat]
+            for j in range(1, self.frames):
+                weight = self.module(torch.cat((batches[i][j - 1: j], batches[i][j:j+1]), dim = 0).view(1, -1))
+                cur_feat = (1 - weight) * batches[i][j:j+1] + weight * cur_feat 
+                feats.append(cur_feat)
+
+            ans.append(torch.cat(feats, dim = 0))
+        return torch.cat(ans, dim = 0)[:n, ...]
+
+class offsetNetV3(offsetNetV2):
+    def _build_net(
+                   self,
+                   in_channels,
+                   base_channels,
+                   out_channels,
+                   depth,
+                   skip = False,
+                   norm = "BatchNorm2d",
+                   dropout = False,
+                   remap = False,
+                   **kwargs
+                  ):
+        super()._build_net(
+                           in_channels,
+                           base_channels,
+                           out_channels,
+                           depth,
+                           skip,
+                           norm,
+                           dropout,
+                           remap,
+                           **kwargs
+                          )
+        self.frames = kwargs.get("frames", 2)
+        self.fusion = Fusion(out_channels, self.frames)
+
+    def forward(self, x):
+        n = x.shape[0]
+
+        if self.norm_type == '_minmax_constant' or self.norm_type == "_minmax_constant_no_norm" or self.norm_type == "_minmax_constant_no_clip":
+            if self.norm_type == "_minmax_constant_no_clip":
+                x = self.norm(x, self._min, self._max, exp_supress)
+            else:
+                x = self.norm(x, self._min, self._max)
+        else:
+            x = self.norm(x)
+        y = self.fusion(self.net(x))
+        
+        if hasattr(self, "z_values"):
+            return torch.clip(y * self.z_values[1, ...] + self.z_values[0, ...], self.clip_values[..., 0], self.clip_values[..., 1])
+        return y
+
+class offsetNetV4(offsetNetV2):
+    def _build_net(
+                   self,
+                   in_channels,
+                   base_channels,
+                   out_channels,
+                   depth,
+                   skip = False,
+                   norm = "BatchNorm2d",
+                   dropout = False,
+                   remap = False,
+                   **kwargs
+                  ):
+        super()._build_net(
+                           in_channels,
+                           base_channels,
+                           out_channels,
+                           depth,
+                           skip,
+                           norm,
+                           dropout,
+                           remap,
+                           **kwargs
+                          )
+
+        self.merge = nn.Linear(out_channels * 2, out_channels)
+
+    def forward(self, x, res):
+        n = x.shape[0]
+
+        if self.norm_type == '_minmax_constant' or self.norm_type == "_minmax_constant_no_norm" or self.norm_type == "_minmax_constant_no_clip":
+            if self.norm_type == "_minmax_constant_no_clip":
+                x = self.norm(x, self._min, self._max, exp_supress)
+            else:
+                x = self.norm(x, self._min, self._max)
+        else:
+            x = self.norm(x)
+        y = self.fusion(self.net(x))
+        
+        y = self.merge(torch.cat((y, res), dim = 1))
+        if hasattr(self, "z_values"):
+            return torch.clip(y * self.z_values[1, ...] + self.z_values[0, ...], self.clip_values[..., 0], self.clip_values[..., 1])
+        return y
+
 class Dataset:
     def __init__(
                  self,
@@ -545,7 +692,8 @@ class Dataset:
                  norm_dim: list = [0, 1],
                  is_abs: bool = False,
                  is_flow_map: bool = False,
-                 use_point: bool = False
+                 use_point: bool = False,
+                 pose_path: str = None
                 ):
 
         assert os.path.exists(attributes_path), f"attribute path {attributes_path} not exist."
@@ -669,6 +817,9 @@ class Dataset:
         current_folder = "/data1/wanghaoran/Amemori/ExpressiveVideoStyleGanEncoding/"
         self.gen_files = [os.path.join(current_folder, x) for x in gen_file_list]
 
+        if pose_path is not None:
+            self.pose = torch.load(pose_path, map_location = 'cpu')
+
     def __len__(self):
         return self.length
 
@@ -731,7 +882,8 @@ class Dataset:
                 self.offsets[index] = op(self.offsets[index])
 
         return attribute, \
-               torch.from_numpy(self.offsets[index]).to(torch.float32) 
+               torch.from_numpy(self.offsets[index]).to(torch.float32), \
+               self.pose[index]
 
 class ValDataset:
     def __init__(self,
@@ -868,7 +1020,8 @@ def aligner(
                           norm_dim = [0, 1] if not hasattr(config.net, "norm_dim") else config.net.norm_dim,
                           is_abs = (config.net.norm_type == "minmax_constant_no_norm"),
                           is_flow_map = False if not hasattr(dataset_config,"is_flow_map") else dataset_config.is_flow_map,
-                          use_point = use_point
+                          use_point = use_point,
+                          pose_path = config.pose_path
                         )
         datasets_list.append(dataset)
     
@@ -912,26 +1065,27 @@ def aligner(
         pos = np.concatenate(((pos)[0, 48:68, :], (pos)[0, 6:11, :]), axis = 0)
 
     net = eval(name)(\
-                    net_config.in_channels * 2 if name == "offsetNet" else net_config.in_channels, size_of_alpha, \
-                    net_config.depth, \
-                    base_channels = 512 if not hasattr(net_config, "base_channels") else net_config.base_channels , 
-                    max_channels = 128 if not hasattr(net_config, "max_channels") else net_config.max_channels , \
-                    dropout = False if not hasattr(net_config, "dropout") else net_config.dropout, \
-                    norm = "BatchNorm1d" if not hasattr(net_config, "norm") else net_config.norm, \
-                    skip = False if not hasattr(net_config, "skip") else net_config.skip, \
-                    is_refine = is_refine, \
-                    norm_type = 'linear' if not hasattr(net_config, "norm_type") else net_config.norm_type, \
-                    _min = offset_range[0], \
-                    _max = offset_range[1],
-                    norm_dim = [0, 1] if not hasattr(net_config, "norm_dim") else net_config.norm_dim,
-                    renorm = renorm,
-                    remap = remap,
-                    use_fourier = use_fourier,
-                    pos = pos,
-                    from_size = 512 if not hasattr(net_config, "from_size") else net_config.from_size,
-                    act = "ReLU" if not hasattr(net_config, "act") else net_config.act,
-                    first_convbn = False if not hasattr(net_config, "first_convbn") else net_config.first_convbn,
-                    target_size = 1 if not hasattr(net_config, "target_size") else net_config.target_size
+                     net_config.in_channels * 2 if name == "offsetNet" else net_config.in_channels, size_of_alpha, \
+                     net_config.depth, \
+                     base_channels = 512 if not hasattr(net_config, "base_channels") else net_config.base_channels , 
+                     max_channels = 128 if not hasattr(net_config, "max_channels") else net_config.max_channels , \
+                     dropout = False if not hasattr(net_config, "dropout") else net_config.dropout, \
+                     norm = "BatchNorm1d" if not hasattr(net_config, "norm") else net_config.norm, \
+                     skip = False if not hasattr(net_config, "skip") else net_config.skip, \
+                     is_refine = is_refine, \
+                     norm_type = 'linear' if not hasattr(net_config, "norm_type") else net_config.norm_type, \
+                     _min = offset_range[0], \
+                     _max = offset_range[1],
+                     norm_dim = [0, 1] if not hasattr(net_config, "norm_dim") else net_config.norm_dim,
+                     renorm = renorm,
+                     remap = remap,
+                     use_fourier = use_fourier,
+                     pos = pos,
+                     from_size = 512 if not hasattr(net_config, "from_size") else net_config.from_size,
+                     act = "ReLU" if not hasattr(net_config, "act") else net_config.act,
+                     first_convbn = False if not hasattr(net_config, "first_convbn") else net_config.first_convbn,
+                     target_size = 1 if not hasattr(net_config, "target_size") else net_config.target_size,
+                     frames = 2 if not hasattr(net_config, "frames") else net_config.frames
                    )
     logger.info(net)
     best_nme = 100.0
@@ -986,12 +1140,12 @@ def aligner(
         for idx, data in enumerate(dataloader):
             with torch.autocast(device_type = "cuda", dtype = torch.float16):
                 optimizer.zero_grad()
-                attr, offset = data
+                attr, offset, pose = data
                 attr = attr.to(device)
                 n = attr.shape[0]
                 offset = offset.to(device)
                 d_loss_value = 0.0
-                pred_attr = net(offset)
+                pred_attr = net(offset, pose)
                 #weight_loss_value = 0
                 #for weight in weights:
                 #    weight = weight.repeat(n, 1, 1)
@@ -1026,11 +1180,11 @@ def aligner(
             # validate 
             net.eval()
             for idy, data in enumerate(val_dataloader):
-                attr, offset = data
+                attr, offset, pose = data
                 attr = attr.to(device)
                 offset = offset.to(device)
                 with torch.no_grad():
-                    pred_attr = net(offset)
+                    pred_attr = net(offset, pose)
 
                 if isinstance(pred_attr, tuple):
                     pred_attr = pred_attr[0]
@@ -1133,7 +1287,8 @@ def sync_lip_validate(
                     from_size = 512 if not hasattr(net_config, "from_size") else net_config.from_size,
                     act = "ReLU" if not hasattr(net_config, "act") else net_config.act,
                     first_convbn = False if not hasattr(net_config, "first_convbn") else net_config.first_convbn,
-                    target_size = 1 if not hasattr(net_config, "target_size") else net_config.target_size
+                    target_size = 1 if not hasattr(net_config, "target_size") else net_config.target_size,
+                    frames = 2 if not hasattr(net_config, "frames") else net_config.frames
                     )
     net.to(device)
     state_dict = torch.load(offset_weight_path)
@@ -1156,7 +1311,13 @@ def sync_lip_validate(
     #        new_dict[k] = v
     decoder.load_state_dict(torch.load(pti_weight_path), False)
     decoder.to(device)
-    attributes = torch.load(attributes_path, map_location="cpu")
+    attributes = torch.load(attributes_path, map_location = "cpu")
+
+    f_space_path = kwargs.get("f_space_path", None) 
+
+    f_space = None
+    if f_space_path:
+        f_space = torch.load(f_space_path, map_location = "cpu")
 
     #get_disentangled_landmarks = DisentangledLandmarks()
     #id_path = e4e_latent_path.replace("pt", "txt")
@@ -1190,7 +1351,7 @@ def sync_lip_validate(
     shift_empty[minus, 0] = shift_y[minus, :].min(axis = 1)
     shift_y = shift_empty
 
-    #landmarks[:,:,1] = landmarks[:,:,1] - shift_y.reshape(-1, 1)
+    landmarks[:,:,1] = landmarks[:,:,1] - shift_y.reshape(-1, 1)
     landmarks = np.concatenate((landmarks[:, 6:11,:],landmarks[:, 48:68,:]), axis = 1)
     id_landmarks = np.concatenate((id_landmarks[:, 6:11,:],id_landmarks[:, 48:68,:]), axis = 1)
     #landmarks = (landmarks - landmarks.mean(axis = (0, 1), keepdims = True)) / (landmarks.std(axis = (0,1), keepdims = True) + 1e-8)
@@ -1214,7 +1375,7 @@ def sync_lip_validate(
     logger.info(f"length is {n}..")
     t = Timer()
 
-    batch_size = 8
+    batch_size = 1
     bundle_datasets = [i for i in range(0, n, batch_size)]
 
     p_bar = tqdm.tqdm(bundle_datasets)
@@ -1302,15 +1463,16 @@ def sync_lip_validate(
                     landmark_map[y, x, :] = 255
             return ((np.concatenate((landmark_map[..., 0:1], id_map[..., 0:1]), axis = 2) / 255.0 - .5) * 2).transpose((2, 0, 1)) 
      
-    if name == "offsetNetV2":
+    if name == "offsetNetV2" or name == "offsetNetV3":
         landmark_offsets = get_maps(_type = "points" if use_point else "polylines", min_max = [net._min.cpu().numpy(), net._max.cpu().numpy()])
     get_pose_func = get_pose(pose_latent_path)
     psnr_value = 0.0
     psnr_values = []
 
-    
+    batch_size = 1
+    smoothen_func = smooth1d_pytorch(ksize = batch_size, sigma = 0.05).to(device)
+
     with imageio.get_writer(save_path, fps = 25) as writer:
-        batch_size = 8
 
         w_plus_with_pose = get_pose_func(0).detach() #torch.load(os.path.join(pose_latent_path, f'{i + 1}.pt'))
         style_space_latent = decoder.get_style_space(w_plus_with_pose.to(device))
@@ -1338,7 +1500,7 @@ def sync_lip_validate(
         def kernel2():
                 
             j = q2.get()
-            output = from_tensor(outputs[ j  % batch_size ])
+            output = from_tensor(outputs[ j % batch_size ])
             h,w = output.shape[:2]
             if driving_files is not None:
                 landmark_offset_np = landmark_offsets[j]
@@ -1366,7 +1528,8 @@ def sync_lip_validate(
                     image_landmark = draw_multiple_landmarks([landmark ,id_landmarks[0]])
                 else:
                     image_landmark = cv2.resize((landmark_offset_np[0:1, :, :].repeat(3, axis = 0).transpose((1,2,0)) * 0.5 + 0.5) * 255, (w,h))
-                output = np.concatenate((output, ref_image, image_landmark), axis = 0)
+                    image_landmark2 = cv2.resize((landmark_offset_np[1:2, :, :].repeat(3, axis = 0).transpose((1,2,0)) * 0.5 + 0.5) * 255, (w,h))
+                output = np.concatenate((output, ref_image, image_landmark, image_landmark2), axis = 0)
             output_queue[j % batch_size] = output
         
         for i in p_bar:
@@ -1388,6 +1551,7 @@ def sync_lip_validate(
             
             with torch.no_grad():
                 offset = net(landmark_offset)
+            #offset = smoothen_func(offset)
             ss_updated = update_lip_region_offset(ss_updated, offset)
             
             """
@@ -1395,7 +1559,11 @@ def sync_lip_validate(
             os.makedirs(pti_training_folder, exist_ok = True)
             [torch.save([x.detach().cpu() for x in ss_updated], os.path.join(pti_training_folder, f"{jj + 1}.pt")) for jj in range(i, end)]
             """
-            outputs = torch.clip((decoder(ss_updated) * 0.5 + 0.5) * 255.0, 0.0, 255.0)
+
+            if f_space:
+                outputs = torch.clip((decoder(ss_updated, insert_feature = {'4': f_space[i].to(device)}) * 0.5 + 0.5) * 255.0, 0.0, 255.0)
+            else:
+                outputs = torch.clip((decoder(ss_updated) * 0.5 + 0.5) * 255.0, 0.0, 255.0)
             [q2.put(j) for j in range(i, end)]
             workers_out = [threading.Thread(target = kernel2, args = ()) for j in range(size)]
             for worker in workers_out:
@@ -1469,7 +1637,8 @@ def evaluate(
                     from_size = 512 if not hasattr(net_config, "from_size") else net_config.from_size,
                     act = "ReLU" if not hasattr(net_config, "act") else net_config.act,
                     first_convbn = False if not hasattr(net_config, "fist_convbn") else net_config.first_convbn,
-                    target_size = 1 if not hasattr(net_config, "target_size") else net_config.target_size
+                    target_size = 1 if not hasattr(net_config, "target_size") else net_config.target_size,
+                    frames = 2 if not hasattr(net_config, "frames") else net_config.frames
                    )
 
     net.to(device)
@@ -1493,6 +1662,7 @@ def evaluate(
     poses = torch.load(os.path.join(current_pwd, pose_path))
     attributes = torch.load(os.path.join(current_pwd, attr_path)) 
     attribute = attributes[0]
+
     
     dataset_config = config.val
     val_dataset = Dataset(

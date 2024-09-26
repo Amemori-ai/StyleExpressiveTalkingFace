@@ -102,6 +102,15 @@ class TalkingFaceModel(torch.nn.Module):
         image = self.decoder(ss_updated)
         return torch.nn.functional.interpolate(image, (512,512))
 
+class TalkingFaceModelv2(TalkingFaceModel):
+    """support f space network.
+    """
+    def forward(self, x, latent):
+        offset = self.net(x)
+        ss_updated = update_lip_region_offset(latent[:-1], offset)
+        image = self.decoder(ss_updated, insert_feature = {"4": latent[-1]})
+        return torch.nn.functional.interpolate(image, (512,512))
+
 def get_blend_mask(
                      image: np.ndarray,
                      face_parse: object
@@ -145,8 +154,15 @@ def deploy(
     with open(net_config_path) as f:
         config = edict(yaml.load(f, Loader = yaml.CLoader))
     
+    f_space = None
+    if hasattr(config, "f_space_path"):
+        f_space_path = os.path.join(current_path, config.f_space_path)
+        f_space = torch.load(f_space_path)
+        model = TalkingFaceModelv2(config.net, net_snapshots_path, decoder_path)
+    else:
+        model = TalkingFaceModel(config.net, net_snapshots_path, decoder_path)
+
     face_parse = face_parsing()
-    model = TalkingFaceModel(config.net, net_snapshots_path, decoder_path)
     model.eval()
     device = 'cpu'
     model.to(device)
@@ -157,6 +173,8 @@ def deploy(
     #index = 1
     latent = torch.randn(1,18,512).to(device)
     style_space = model.decoder.get_style_space(latent)
+    if f_space:
+        style_space += [torch.randn(1,512,4,4).to(device)]
     module = torch.jit.trace(model, (_input, style_space), check_trace = False) 
     #module = torch.jit.trace(model, (_input, 0), check_trace = False) 
     output_original = model(_input, style_space)
@@ -172,9 +190,7 @@ def deploy(
         logger.info("update patch")
         return 
 
-
     logger.info("get landmark.")
-
     output_onnx = onnx_infer(onnx_model_path, _input, style_space)
     diff = np.abs(output_original.detach().cpu().numpy() - output_onnx)
     logger.info(f"max error {diff.max()}, min error {diff.min()}, avg error {diff.mean()}")
@@ -213,7 +229,8 @@ def deploy(
         style_space_latent = model.decoder.get_style_space(w_plus_with_pose.to("cuda:0"))
         ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1][size_of_alpha:]).reshape(1, -1).to('cuda:0'), [8, len(alphas)])
         #ss_updated = update_region_offset(style_space_latent, torch.tensor(attribute[1]).reshape(1, -1).to('cuda:0'), [0, len(alphas)])
-
+        if f_space:
+            ss_updated.append(f_space[i])
         if i < 0:
             image_tensor = model(torch.from_numpy(offsets[i:i+1]).to(device), ss_updated)
             image = image_tensor.detach().cpu().squeeze(0).permute((1,2,0)).numpy()
@@ -224,14 +241,19 @@ def deploy(
             numpy_arrays = []
             for index, z in enumerate(ss_updated):
                 z = z.detach().cpu().numpy()
-                _,c = z.shape
-                empty_array = np.empty((n,c), dtype = z.dtype)
-                empty_array[i:i+1, :] = z
+                if z.ndim == 2:
+                    _,c = z.shape
+                    empty_array = np.empty((n, c), dtype = z.dtype)
+                elif z.ndim == 4:
+                    _,c,h,w = z.shape
+                    empty_array = np.empty((n, c, h, w), dtype = z.dtype)
+
+                empty_array[i:i+1, ...] = z
                 to_save_list.append(empty_array)
         else:
             for index, z in enumerate(ss_updated):
                 z = z.detach().cpu().numpy()
-                to_save_list[index][i:i+1, :] = z
+                to_save_list[index][i:i+1, ...] = z
     #np.save(to_path_masks, to_save_mask)
     with open(to_path_latents, 'wb') as f:
         pickle.dump(to_save_list, f, protocol = 4)

@@ -35,8 +35,10 @@ def infer(
     pose_latent_path = config.pose_latent_path
     id_landmark = config.id_landmark
 
+    f_space_path = config.f_space_path if hasattr(config, "f_space_path") else None
+
     net_exp_name = config.net.config.split('/')[-2]
-    pti_exp_name = list(filter(lambda x: 'exp' in x or 'pivot' in x or 'pti' in x, pti_weight.split('/')))[0]
+    pti_exp_name = list(filter(lambda x: 'exp' in x or 'pivot' in x or 'pti' in x or 'bdinv' in x, pti_weight.split('/')))[0]
     pose_exp_name = pose_latent_path.split('/')[-2]
 
     if not save_path.endswith("mp4"):
@@ -56,6 +58,7 @@ def infer(
                       save_path,
                       video_images_path,
                       driving_images_dir,
+                      f_space_path = f_space_path,
                       resolution = config.resolution,
                       blender = blender,
                       frames = frames if not hasattr(config, "frames") else config.frames,

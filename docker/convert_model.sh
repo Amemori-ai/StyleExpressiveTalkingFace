@@ -14,9 +14,9 @@ docker run  \
        --exp_name $expname\
        --decoder_path \
        $decoder_path \
-      --to_path /app/release \
-      --image_path  $image_path \
-      --patch $patch
+       --to_path /app/release \
+       --image_path  $image_path \
+       --patch $patch 
 
 
 aws s3 sync release/$expname  s3://update-weights/model/Voice2Lip_v1.3.1/$expname
